@@ -1,0 +1,84 @@
+# [v1.4] 왕비집 예약관리 시스템 기능명세서 (완전판 - 최종)
+
+## 1. 개요
+- **목적**: 왕비집 예약 및 슬롯 관리 효율화.
+- **플랫폼**: Google Sheets + Google Apps Script (GAS).
+- **웹앱 배포 설정**:
+    - 실행 권한: **Me**
+    - 접근 권한: **Every Google Account**
+- **접근 권한**: admin(전체 매장 예약정보, 슬롯정보, 유저정보), manager(권한 허용된 매장 예약정보, 슬롯정보), viewer (권한 허용된 매장 예약 정보).
+- **배경**:
+    - Elfsight 위젯 사용.
+    - **슬롯 확보 전략**: 예약 접수 시, Responses 시트 데이터를 reservation 테이블로 옮기고, **지점별 캘린더**로 이벤트를 복사한 뒤, 잔여 슬롯이 있다면 기본 캘린더에서 원본 이벤트를 삭제하여 슬롯을 추가 확보.
+
+## 2. 기술 스택
+- **FE**: Vue.js 3 (Composition API), Tailwind CSS, Phosphor Icons, KaKao API. **[추가]** **Quill.js** (HTML Editor).
+- **BE**: Google Apps Script (GAS).
+- **DB**: Google Sheets (Apps Script Native API, Sheets API).
+
+## 3. 아키텍쳐 & 데이터베이스
+### 3.1. 프론트엔드 전략
+- **인증 방식**: 구글 계정 기반 인증으로 변경.
+    - **페이지 진입**: 기존 로그인 화면 **삭제**. 구글 로그인 화면 자동 노출 및 세션 이메일 획득.
+    - **로그인 성공**: 세션 이메일이 `user` 테이블에 존재하면 메인 앱 화면 표시.
+    - **로그인 실패**: 세션 이메일이 `user` 테이블에 없으면 **접근 불가 안내 커스텀 오류 페이지 노출**.
+- **SPA 구조**: `List`, `Calendar`, `Setting` 탭 기반 화면 전환.
+- **상태 관리/캐싱**:
+    - **Initial Load Caching**: 첫 진입 시 서버에서 **모든 필요 데이터** (예약 데이터, Branch Map, Slot Map 등 시스템 설정 데이터)를 로컬 메모리에 로드하여 캐싱.
+- **초기 로딩 동기화**: 예약 데이터 및 시스템 설정 데이터 로드가 **모두 완료된 후에만** 스피너를 종료하고 메인 화면 표시.
+- **데이터 동기화 (Background Sync)**: 초기 로딩 완료 후, 1분마다 서버 데이터를 백그라운드에서 조회하여 로컬 데이터를 업데이트.
+
+### 3.2. 백엔드 (GAS) 로직
+- **인증 로직 (UserService.login)**: 로그인 세션의 Google 이메일 (`UserService.getLoginUserEmail()`)과 `user` 테이블의 `user_email` 필드를 비교하여 인증 여부 및 사용자 역할 (`role`) 판단. **비밀번호/해시 사용 안함.**
+- **ReservationBatch (1분마다 실행)**: 예약금 자동 처리 로직 포함.
+- **GAS 인스턴스 관리**: `ReservationBatch.gs`, `WebApi.gs`를 제외한 모든 서비스 파일은 `const Service = {}` 구조의 Singleton 객체로 변경.
+
+### 3.3. 데이터베이스 (Google Sheets)
+- **시트 조회 방식**: 헤더명 기반의 Object 배열 형태로 조회하도록 Util Service 로직 변경.
+
+| 시트명 | 기존 컬럼 | 변경/추가 컬럼 | 비고/추가사항 |
+| :--- | :--- | :--- | :--- |
+| **user** | `id`, `user_name`, `role`, `enabled`, `created_at`, `updated_at` | **`user_email`** (추가) | **`user_id`, `user_password_hash`, `salt` 삭제** |
+| **reservation** | (기존 13개) | **`internal_notes`**, **`deposit_status`**, **`deposit_amount`**, **`deposit_paid_at`**, **`deposit_refund_at`** (5개 추가) | `notes`는 고객 메모로 용도 분리. |
+| **branch** | `id`, `branch_name_en`, `branch_name_ko`, `location`, `enabled`, `calendar_id`, `created_at`, `updated_at` | 변경 없음 | 지점 마스터 정보. |
+| **user_branch_permission** | `id`, `user_id`, `branch_id`, `enabled`, `created_at`, `updated_at` | 변경 없음 | 사용자별 접근 허용 지점 매핑 정보. |
+| **slot_master** | `id`, `time`, `slot`, `enabled`, `created_at`, `updated_at` | 변경 없음 | 전체 지점 공통 시간대 마스터 정보. |
+| **slot_default** | `id`, `branch_id`, `slot_master_id`, `slot`, `enabled`, `created_at`, `updated_at` | 변경 없음 | 지점별/시간대별 기본 슬롯 설정. |
+| **slot_override** | `id`, `branch_id`, `slot_master_id`, `date`, `slot`, `reason`, `enabled`, `created_at`, `updated_at` | 변경 없음 | 특정 일자에 기본 슬롯을 재정의하는 정보. |
+
+---
+
+## 4. 상세 기능 정의
+
+### 4.1. 공통 헤더 (Header)
+- **헤더**: 오늘 날짜, 앱 제목, 사용자 role 표시.
+- **프로필 UI**: 우측 상단에 **구글 프로필 UI 구현** (동그라미 + 이니셜).
+    - 클릭 시 **프로필 팝업 노출**: `Hi [user_name]!` 표시 및 그 밑에 작게 로그인 이메일 표시.
+
+### 4.2. 예약 리스트 (Tab: List)
+- **검색 및 필터**:
+    - **날짜 검색, 지점 필터, 상태 필터** (예약/취소) 유지.
+    - **[추가] 예약금 상태 필터**: 드롭다운 추가 (옵션: n/a, pending, confirm, refund).
+    - **검색어 필터링**: **지점명, 이름, 이메일, 고객 메모(`notes`), 관리자 메모(`internal_notes`)** 컬럼에서 실시간 필터링.
+- **정렬 (Sorting)**: Desktop 테이블 헤더 클릭 시 정렬 토글 지원.
+    - **[추가] 예약금 상태 정렬**: `deposit_status` 컬럼에 대해 정렬 기능 추가.
+- **UI 표시**: **고객 메모**, **관리자 메모** 컬럼 분리 표시. **예약금 상태** 표시.
+- **모바일**: **모바일 카드뷰에 필터 및 정렬 드롭다운 추가**.
+
+### 4.3. 예약 상세/추가/수정 (Modal)
+- **읽음 처리**: 모달 오픈 시 또는 **카카오톡 전송 버튼 클릭 시** 읽음 처리.
+- **슬롯 마감 연동**: 지점, 방문일 선택값에 연동하여 **예약 마감된 방문 시간 슬롯은 딤드 처리 및 선택 불가** 처리.
+- **메모 분리**: **고객 메모 (`notes`)**와 **관리자 메모 (`internal_notes`)** 입력 필드 분리.
+- **예약금 관리 (9인 이상 시 노출)**:
+    - `deposit_status`, `deposit_amount`만 수정 가능.
+    - 읽기 모드에 예약 변경/취소 및 예약금 관련 **템플릿 메일 발송 기능 드롭다운** 추가.
+
+### 4.4. 예약 캘린더 (Tab: Calendar)
+- **구성**: 구글 캘린더 embed iframe.
+
+### 4.5. 시스템 설정 (Tab: Setting)
+- **공통 UI/UX**: 리스트 아이템 클릭 시 수정 모달 오픈으로 통일. 수정 버튼 삭제.
+- **탭 구성**:
+    - **1. 사용자**: `user_id` 대신 **`user_email`** 기반으로 관리. 비밀번호/솔트 필드 제거.
+    - **5. 커스텀 슬롯**: **날짜 탐색기 기반의 일자 피벗 뷰로 변경**. 아이템 클릭 시 일괄 수정 모달 오픈.
+    - **6. 메일 템플릿**: 자동화 답변 메일 템플릿 5종 관리 및 **Quill.js 기반** HTML 편집기 지원.

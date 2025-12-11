@@ -1,0 +1,1892 @@
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    console.log('JS 모듈이 로드되었습니다!');
+
+    // Set header date
+    const todayDateEl = document.getElementById('today-date');
+    if (todayDateEl) {
+        todayDateEl.textContent = new Date().toLocaleDateString('ko-KR', {
+        year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
+        });
+    }
+    
+    // Add login event listener
+    loginBtn.addEventListener('click', handleLogin);
+    passcode.addEventListener('keypress', (e) => (e.key === 'Enter') && handleLogin());
+    loginId.addEventListener('keypress', (e) => (e.key === 'Enter') && handleLogin());
+
+    loginId.focus();
+    
+    // Add search event listener
+    searchBtn.addEventListener('click', () => handleSearch(false));
+    
+    // Add modal save listeners
+    resModalForm.addEventListener('submit', handleReservationSave);
+    adminModalForm.addEventListener('submit', handleAdminSave);
+    adminAddBtn.addEventListener('click', () => openAdminModal(null));
+
+    // Hide spinner on initial load (after setup)
+    setTimeout(() => showSpinner(false), 50);
+  });
+
+  /* --- 1. Constants & State --- */
+  const CALENDAR_URL = "https://calendar.google.com/calendar/embed?&wkst=2&ctz=Asia%2FSeoul&hl=ko&title=%EC%99%95%EB%B9%84%EC%A7%91%20%EC%98%88%EC%95%BD%20%EC%BA%98%EB%A6%B0%EB%8D%94&showPrint=0&showTz=0&src=MmZiMTNkYzIyMDczM2Y3Y2U2MWJhMmFiMjM2NmY1YjQ3OWFhMmQyYjhkN2EzNGE3NzZlZWE3YzQyMDcxMjhkY0Bncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=ZDE4YTZhMTMyNDhkOWE1MTI2N2M4OTgyZTcwNjE3NGI3MDI4YjVjNmFhOGU3NGE5NDUzZDNjOGQ1OWYyOTI1YUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=ZTZkMzY3NjQ3ZGU5ZTQzODUyYTBlNjE3OTljYmU4N2FjYmMwZjRmYjdhMmJmMTFlMzMyY2RiZTg3NTU1MDZkNEBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=OTkxODFlMzc5YjdmZTBkMzY5NjJjODc5MzcyODQ1ZTBkMDBjMmU4YmE4ZWM4ZjNmYTQzZjZhMThkZWVlYjVhYUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=YmE5NmExOGRjZWVjNzZiODcwZWIzYWY5OWM2NjUwOTJmNzA1MGY3M2FlMWM2NDJjZmRmYWVmYmNiYjMzNmYxOUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=YTM4MGRjNTBmMjEyN2RlMmI5MzlmODcxNTU4MzUzMTZjNWQxMDBkNTk4MmZkMTEzZmM3NTI4ZWZhNzlhOGJkMUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&color=%23ef6c00&color=%237cb342&color=%238e24aa&color=%239e69af&color=%23ef6c00&color=%23c0ca33"; 
+  
+  // Application State
+  let userLevel = 0; 
+  let currentView = 'list';
+  let allReservationData = [];
+  let filteredReservationData = [];
+  let activeBranchFilters = new Set();
+  let currentPage = 1;
+  let pageSize = 10;
+  let lastUpdatedId = null;
+  let currentStatusFilter = 'all';
+  let sortState = {
+    column: 'visit_date',
+    direction: 'asc'
+  };
+  
+  // (Admin) State
+  let currentUser = null;
+  let dropdownData = {}; 
+  let currentAdminSheet = '';
+  let currentAdminData = {}; 
+  let currentAdminEditId = null;
+  let isAdminDataLoaded = false;
+  let defaultAdminSheet = '';
+  let currentModalId = null;
+
+  // (Admin) 시트 설정
+  const ADMIN_SHEETS = {
+    USER: { name: 'user', title: '사용자', icon: '👤' },
+    BRANCH: { name: 'branch', title: '지점', icon: '📍' },
+    SLOT_MASTER: { name: 'slot_master', title: '마스터 슬롯', icon: '⏰' },
+    SLOT_DEFAULT: { name: 'slot_default', title: '기본 슬롯', icon: '📅' },
+    SLOT_OVERRIDE: { name: 'slot_override', title: '커스텀 슬롯', icon: '✨' }
+  };
+
+  const COLUMN_LABELS = {
+    'user_id': '아이디', 'user_name': '이름', 'role': '권한', 'enabled': '활성',
+    'branch_name_en': '지점명(영어)', 'branch_name_ko': '지점명', 'branch_name': '지점명', 'location': '위치(구글맵)',
+    'time': '시간', 'date': '날짜', 'slot': '슬롯', 'reason': '사유',
+    'branch_id': '지점 ID' 
+  };
+  
+  // DOM Elements
+  const loginScreen = document.getElementById('login-screen');
+  const appScreen = document.getElementById('app-screen');
+  const loginBtn = document.getElementById('login-btn');
+  const loginId = document.getElementById('login-id');
+  const passcode = document.getElementById('passcode');
+  const loginError = document.getElementById('login-error');
+  const userInfo = document.getElementById('user-info');
+  const searchBtn = document.getElementById('search-btn');
+  const tableBody = document.getElementById('results-table-body');
+  const branchFiltersEl = document.getElementById('branch-filters');
+  const paginationEl = document.getElementById('pagination');
+  const pageSizeEl = document.getElementById('page-size');
+  const pageSizeControls = document.getElementById('page-size-controls');
+  const calendarIframe = document.getElementById('calendar-iframe');
+  const spinner = document.getElementById('spinner-overlay');
+  
+  // Reservation Modal
+  const resModal = document.getElementById('edit-modal');
+  const resModalSaveBtn = document.getElementById('modal-save-btn');
+  const resModalForm = document.getElementById('edit-modal-form');
+  
+  // Admin Modal
+  const adminModal = document.getElementById('admin-modal');
+  const adminModalTitle = document.getElementById('admin-modal-title');
+  const adminModalForm = document.getElementById('admin-modal-form');
+  const adminModalFields = document.getElementById('admin-modal-form-fields');
+  const adminModalSaveBtn = document.getElementById('admin-modal-save-btn');
+  const adminAddBtn = document.getElementById('admin-add-btn');
+
+  /* --- 2. Initialization --- */
+  function setDefaultDates() {
+    const today = new Date();
+    const todayStr = formatYMD(today);
+
+    const yesterday = new Date(today.getTime() - 1 * 24 * 60 * 60 * 1000);
+    const yesterdayStr = formatYMD(yesterday);
+
+    const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const nextWeekStr = formatYMD(nextWeek);
+
+    const searchModeEl = document.getElementById('search-mode');
+    const startEl = document.getElementById('start-date');
+    const endEl = document.getElementById('end-date');
+
+    if (userLevel === 2) {
+      // 관리자: "요청일" 기준, "오늘 하루" (신규 건 확인용)
+      searchModeEl.value = 'request';
+      startEl.value = yesterdayStr;
+      endEl.value = todayStr;
+    } else {
+      // 직원: "방문일" 기준, "오늘 ~ 일주일" (운영 확인용)
+      searchModeEl.value = 'visit';
+      startEl.value = todayStr;
+      endEl.value = nextWeekStr;
+    }
+  }
+
+  function formatYMD(d) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  /* --- 3. Authentication --- */
+  function handleLogin() {
+    const id = loginId.value;
+    const pw = passcode.value;
+    
+    if (!id || !pw) {
+      loginError.textContent = "ID와 비밀번호를 모두 입력하세요.";
+      return;
+    }
+    
+    loginError.textContent = "";
+    showSpinner(true);
+    
+    google.script.run
+      .withSuccessHandler(onLoginSuccess)
+      .withFailureHandler(onFailure)
+      .checkLogin(id, pw);
+  }
+  
+  function onLoginSuccess(result) {
+    if (result.success) {
+      currentUser = result.user;
+      
+      if (currentUser.role === 'admin' || currentUser.role === 'manager') {
+        userLevel = 2;
+      } else {
+        userLevel = 1;
+      }
+
+      initializeApp();
+    } else {
+      loginError.textContent = result.error;
+      showSpinner(false);
+    }
+  }
+
+  async function initializeApp() {
+    loginScreen.style.display = 'none';
+    appScreen.style.display = 'block';
+    userInfo.textContent = `${currentUser.userName} (${currentUser.role})`;
+    
+    if (userLevel === 2) {
+      document.getElementById('app-title').innerHTML = '왕비집 예약관리 시스템 <span class="admin-subtitle">(관리자 모드)</span>';
+      document.body.classList.add('admin-mode');
+      document.querySelectorAll('.admin-only').forEach(el => {
+        const displayStyle = (el.tagName === 'TH' || el.tagName === 'TD') ? 'table-cell' : 'block';
+        el.style.display = displayStyle;
+      });
+      
+      const role = currentUser.role;
+      const allSheets = Object.values(ADMIN_SHEETS);
+      const allowedSheets = allSheets.filter(sheet => {
+        if (role === 'admin') return true; 
+        if (role === 'manager') return ['slot_default', 'slot_override'].includes(sheet.name); 
+        return false; 
+      });
+
+      if (allowedSheets.length > 0) {
+        defaultAdminSheet = allowedSheets[0].name;
+      }
+    } else {
+      document.getElementById('settings-tab').style.display = 'none';
+    }
+    
+    setDefaultDates();
+
+    showView('list');
+    showSpinner(true);
+
+    try {
+      if (!isAdminDataLoaded) {
+        const sheetToLoad = defaultAdminSheet || 'branch'; 
+        await loadAdminInitialData(sheetToLoad, true);
+        isAdminDataLoaded = true; 
+      }
+
+      await handleSearch(false, false);
+
+    } catch (e) {
+      console.error("초기화 중 오류:", e);
+      showSpinner(false);
+    }
+  }
+
+  /* --- 4. View (Tab) Switching --- */
+  async function showView(viewName) {
+    currentView = viewName;
+
+    // Tab UI
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.getElementById(viewName + '-view').classList.add('active');
+    document.querySelectorAll('.tab-link').forEach(el => el.classList.remove('active'));
+    document.querySelector(`.tab-link[onclick="showView('${viewName}')"]`).classList.add('active');
+
+    // Data Load Check
+    if (!isAdminDataLoaded) {
+      const sheetToLoad = defaultAdminSheet || 'branch'; 
+      await loadAdminInitialData(sheetToLoad);
+      isAdminDataLoaded = true; 
+    }
+
+    // UI Logic per View
+    if (viewName === 'list') {
+      const showPagination = (userLevel === 2);
+      pageSizeControls.style.display = showPagination ? 'block' : 'none';
+    } 
+    else if (viewName === 'calendar') {
+      if (calendarIframe.src === 'about:blank') {
+        calendarIframe.src = CALENDAR_URL;
+      }
+      const lokmmeClassEls =  calendarIframe.querySelectorAll('.lokmme');
+      if (lokmmeClassEls.length === 2) {
+        lokmmeClassEls[1]
+      }
+      pageSizeControls.style.display = 'none';
+    } 
+    else {
+      pageSizeControls.style.display = 'none';
+    }
+  }
+
+  /* --- 5. Data Fetching (Reservation) --- */
+  async function handleSearch(keepPage = false, keepSpinner = false) {
+    const searchMode = document.getElementById('search-mode').value;
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+    
+    if (!startDate || !endDate) {
+      alert("시작일과 종료일을 모두 선택해주세요.");
+      return;
+    }
+
+    if (!keepPage) {
+      currentPage = 1;
+
+      if (searchMode === 'request') {
+         // 요청일 기준 검색이면 -> 요청일 최신순이 국룰
+         sortState = { column: 'request_date', direction: 'desc' };
+      } else {
+         // 방문일 기준 검색이면 -> 방문일 빠른순이 국룰
+         sortState = { column: 'visit_date', direction: 'asc' };
+      }
+
+      updateHeaderSortIcons();
+    }
+    
+    showSpinner(true);
+
+    try {
+      const jsonString = await runGoogleScript('getReservations', startDate, endDate, searchMode, currentUser);
+      onReservationDataReceived(jsonString, keepSpinner);
+    } catch (error) {
+      onFailure(error);
+    }
+  }
+
+  function onReservationDataReceived(jsonString, keepSpinner = false) {
+    try {
+      let data = [];
+      if (typeof jsonString === 'string') {
+        data = JSON.parse(jsonString);
+      } else if (jsonString) {
+        data = jsonString;
+      }
+
+      allReservationData = data || []; 
+      activeBranchFilters.clear(); 
+      
+      renderBranchFilters();
+      applyFiltersAndRender();
+      
+    } catch (e) {
+      console.error("onReservationDataReceived Error:", e);
+      alert("데이터 처리 중 오류: " + e.message);
+      showSpinner(false); // 에러 시엔 즉시 끔
+    } finally {
+      if (!keepSpinner) {
+        setTimeout(() => { showSpinner(false); }, 200);
+      }
+    }
+  }
+  
+  /* --- 6. Filtering & Pagination --- */
+  function renderBranchFilters() {
+    const badgeContainer = document.getElementById('branch-badge-container');
+    if (!badgeContainer) return;
+    
+    badgeContainer.innerHTML = ''; // 초기화
+
+    if (!allReservationData || allReservationData.length === 0) {
+      badgeContainer.innerHTML = '';
+      return;
+    }
+
+    const branchIds = [...new Set(allReservationData.map(item => item.branch_id))];
+    const branchesData = dropdownData.branches || [];
+    const branchNameMap = new Map(branchesData.map(b => [b.id, b.name]));
+
+    branchIds.forEach(branchId => {
+      const branchName = branchNameMap.get(branchId) || '기타';
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = branchName;
+      
+      if (activeBranchFilters.has(branchId)) {
+        badge.classList.add('active');
+      }
+      
+      badge.onclick = () => toggleBranchFilter(badge, branchId);
+      badgeContainer.appendChild(badge);
+    });
+  }
+
+  function toggleBranchFilter(badgeEl, branchId) {
+    badgeEl.classList.toggle('active');
+    if (activeBranchFilters.has(branchId)) {
+      activeBranchFilters.delete(branchId);
+    } else {
+      activeBranchFilters.add(branchId);
+    }
+    currentPage = 1;
+    applyFiltersAndRender();
+  }
+
+  function changeStatusFilter(val) {
+    currentStatusFilter = val; // 'all', 'true', 'false' (문자열임)
+    currentPage = 1; // 필터 바뀌면 1페이지로
+    applyFiltersAndRender();
+  }
+  
+  function changePageSize(size) {
+    pageSize = parseInt(size, 10);
+    currentPage = 1;
+    applyFiltersAndRender();
+  }
+
+  function handleSort(columnKey) {
+    if (sortState.column === columnKey) {
+      sortState.direction = (sortState.direction === 'asc') ? 'desc' : 'asc';
+    } else {
+      sortState.column = columnKey;
+      sortState.direction = 'desc';
+    }
+    
+    applyFiltersAndRender();
+  }
+
+  function applyFiltersAndRender() {
+    let tempData = [...allReservationData];
+
+    if (activeBranchFilters.size > 0) {
+      tempData = tempData.filter(item => activeBranchFilters.has(item.branch_id));
+    }
+
+    if (currentStatusFilter !== 'all') {
+      const targetStatus = (currentStatusFilter === 'true');
+      tempData = tempData.filter(item => item.status === targetStatus);
+    }
+
+    const { column, direction } = sortState;
+    const dirMultiplier = direction === 'asc' ? 1 : -1;
+
+    const branches = dropdownData.branches || []; 
+    const branchMap = new Map(branches.map(b => [b.id, b.name]));
+
+    tempData.sort((a, b) => {
+      let valA = a[column];
+      let valB = b[column];
+
+      // (예외처리 1) 지점ID인 경우 -> 지점명으로 변환해서 비교
+      if (column === 'branch_id') {
+        valA = branchMap.get(valA) || '';
+        valB = branchMap.get(valB) || '';
+      }
+
+      // (예외처리 2) 문자열 비교 (null 처리 포함)
+      if (typeof valA === 'string') valA = valA.toLowerCase();
+      if (typeof valB === 'string') valB = valB.toLowerCase();
+
+      // (예외처리 3) Null값은 항상 뒤로
+      if (!valA && valA !== 0 && valA !== false) return 1;
+      if (!valB && valB !== 0 && valB !== false) return -1;
+
+      if (valA < valB) return -1 * dirMultiplier;
+      if (valA > valB) return 1 * dirMultiplier;
+
+      return 0;
+    });
+
+    filteredReservationData = tempData;
+
+    updateHeaderSortIcons();
+
+    const totalCountEl = document.getElementById('total-count-display');
+    if (totalCountEl) {
+      const countStr = filteredReservationData.length.toLocaleString(); 
+      totalCountEl.innerHTML = `검색 결과: <strong>${countStr}</strong> 건`;
+    }
+    
+    renderReservationTable();
+    renderPagination();
+  }
+
+  function updateHeaderSortIcons() {
+    document.querySelectorAll('#reservation-table-header th').forEach(th => {
+      th.classList.remove('asc', 'desc');
+    });
+    
+    const activeTh = document.querySelector(`th[onclick="handleSort('${sortState.column}')"]`);
+    if (activeTh) {
+      activeTh.classList.add(sortState.direction);
+    }
+  }
+
+  function getLabel(key) {
+    return COLUMN_LABELS[key] || key; 
+  }
+
+  function getTruncatedText(text, limit) {
+    return text && text.length > limit
+        ? text.substring(0, limit) + "…"
+        : text || "";
+  }
+
+  /**
+   * [CORE] Reservation Table Rendering
+   */
+  function renderReservationTable() {
+    tableBody.innerHTML = "";
+    const cardListContainer = document.getElementById('card-list-container');
+    cardListContainer.innerHTML = "";
+    
+    const thKakao = document.getElementById('th-kakao');
+    if (thKakao) {
+       thKakao.style.display = (userLevel === 2) ? 'table-cell' : 'none';
+    }
+
+    if (filteredReservationData.length === 0) {
+      const cols = userLevel === 2 ? 12 : 11; 
+      tableBody.innerHTML = `<tr><td colspan="${cols}" style="text-align: center; padding: 30px;">표시할 데이터가 없습니다.</td></tr>`;
+      cardListContainer.innerHTML = `<p style="text-align: center; padding: 30px;">표시할 데이터가 없습니다.</p>`;
+      return;
+    }
+
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const pageData = filteredReservationData.slice(startIndex, endIndex);
+
+    const branches = dropdownData.branches || []; 
+    const branchMap = new Map(branches.map(b => [b.id, b.name]));
+
+    pageData.forEach((item, index) => {
+      const branchName = branchMap.get(item.branch_id) || '알수없음';
+      const statusText = item.status ? '예약' : '취소';
+      const statusClass = item.status ? 'status-예약' : 'status-취소';
+
+      let statusHtml = '';
+      if (userLevel === 2) {
+        statusHtml = `
+          <select onchange="handleChangeStatus('${item.id}', this.value)">
+            <option value="true" ${item.status ? 'selected' : ''}>예약</option>
+            <option value="false" ${!item.status ? 'selected' : ''}>취소</option>
+          </select>`;
+      } else {
+        statusHtml = `<span class="${statusClass}">${statusText}</span>`;
+      }
+
+      let kakaoTdHtml = '';
+      if (userLevel === 2) {
+        const hasSentDate = item.message_sent_at && item.message_sent_at !== '';
+        
+        const dateHtml = hasSentDate 
+          ? `<span class="text-dimmed">${item.message_sent_at}</span>` 
+          : ''; 
+
+        kakaoTdHtml = `
+          <td style="text-align:center;">
+            <div class="kakao-cell">
+              <button class="action-btn btn-kakao" onclick="sendKakao(event, '${item.id}')">전송</button>
+              ${dateHtml}
+            </div>
+          </td>`;
+      }
+
+      let rowClass = '';
+      let nameHtml = getTruncatedText(item.customer_name, 13);
+      let nameHtmlForCard = getTruncatedText(item.customer_name, 18);
+      
+      if (item.is_read === false) {
+        rowClass = 'row-unread';
+        nameHtml = `<span class="badge-new">N</span> ${nameHtml}`;
+      } else if (item.status === false) {
+        rowClass = 'row-cancelled'; // 2순위: 취소됨 (빨강)
+      }
+      
+      if (item.id === lastUpdatedId) {
+        rowClass += ' row-updated';
+      }
+
+      // Desktop View
+      const tr = document.createElement('tr');
+      tr.className = rowClass;
+      tr.id = `tr-${item.id}`; 
+      tr.onclick = (e) => handleRowClick(e, item.id);
+      tr.style.cursor = "pointer";
+
+      const notesText = getTruncatedText(item.notes, 15);
+      const emailText = getTruncatedText(item.email, 20);
+
+      tr.innerHTML = `
+        <td style="text-align:center;">${startIndex + index + 1}</td>
+        <td style="text-align:center;">${branchName}</td>
+        <td style="text-align:center;">${item.visit_date}</td>
+        <td style="text-align:center;">${item.visit_time}</td>
+        <td style="text-align:center;">${nameHtml}</td>
+        <td style="text-align:center;">${item.pax}</td>
+        <td style="text-align:left;">${notesText}</td>
+        <td style="text-align:left;">${emailText}</td>
+        <td style="text-align:center;">${item.request_date}</td>
+        <td style="text-align:center;">${statusHtml}</td>
+        ${kakaoTdHtml}
+      `;
+      tableBody.appendChild(tr);
+
+      // Mobile Card View
+      const card = document.createElement('div');
+      card.className = `result-card ${rowClass}`;
+      card.id = `card-${item.id}`;
+      card.onclick = (e) => handleRowClick(e, item.id);
+      card.style.cursor = "pointer";
+
+      const dotClass = item.status ? 'green' : 'red';
+      const statusLabel = item.status ? '예약' : '취소';
+      const statusHtmlMobile = `
+        <div class="status-indicator">
+          <span class="status-dot ${dotClass}"></span>
+          ${statusLabel}
+        </div>
+      `;
+      
+      let mobileKakaoSendHtml = '';
+      let mobileKakaoConfirmHtml = '';
+      if (userLevel === 2) {
+          const hasSentDate = item.message_sent_at && item.message_sent_at !== '';
+          const dateHtml = hasSentDate 
+            ? `<span class="text-dimmed" style="font-size:10px;">${item.message_sent_at}</span>` 
+            : '';
+            
+          mobileKakaoSendHtml = `
+            <div style="display:flex; flex-direction:column; align-items:center; margin-left:5px;">
+               <button class="action-btn btn-kakao" onclick="sendKakao(event, '${item.id}')">카톡 전송</button>
+               ${dateHtml}
+            </div>`;
+          mobileKakaoConfirmHtml = `
+            <div style="display:flex; flex-direction:column; align-items:center; margin-left:5px;">
+               <button class="action-btn" onclick="confirmKakao(event, '${item.id}')">카톡 완료체크</button>
+            </div>`;
+      }
+
+      let cardStatusDropdown = '';
+      if (userLevel === 2) {
+        cardStatusDropdown = `
+          <div class="custom-select-wrapper">
+            <select class="custom-select" onchange="handleChangeStatus('${item.id}', this.value)">
+              <option value="true" ${item.status ? 'selected' : ''}>예약</option>
+              <option value="false" ${!item.status ? 'selected' : ''}>취소</option>
+            </select>
+          </div>`;
+      }
+
+      card.innerHTML = `
+        <div class="card-header">
+          <h3>${nameHtmlForCard} 님 <span>(${item.pax}명)</span></h3>
+          ${statusHtmlMobile}
+        </div>
+        <div class="card-body">
+          <p><strong>지 점 명:</strong> ${branchName}</p>
+          <p><strong>방 문 일:</strong> ${item.visit_date}</p>
+          <p><strong>방문시간:</strong> ${item.visit_time}</p>
+          <p><strong>이 메 일:</strong> ${item.email || '-'}</p>
+          <p><strong>비    고:</strong> ${notesText || '-'}</p>
+          <p><strong>요 청 일:</strong> ${item.request_date}</p>
+        </div>
+        <div class="card-actions" style="flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px;">
+           ${cardStatusDropdown} ${mobileKakaoConfirmHtml} ${mobileKakaoSendHtml}
+        </div>
+      `;
+      cardListContainer.appendChild(card);
+    });
+
+    // Scroll to updated row
+    if (lastUpdatedId) {
+      const targetElement = document.querySelector('.row-updated');
+      if (targetElement) {
+        targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      setTimeout(() => { lastUpdatedId = null; }, 1000);
+    }
+  }
+
+  function handleRowClick(event, id) {
+    const target = event.target;
+    const tagName = target.tagName.toLowerCase();
+    
+    if (tagName === 'button' || tagName === 'select' || tagName === 'option' || target.closest('button')) {
+      return; 
+    }
+
+    openEditModal(id);
+  }
+
+  function renderPagination() {
+    const containers = [
+      document.getElementById('pagination-top'),
+      document.getElementById('pagination-bottom')
+    ];
+    
+    containers.forEach(c => { if(c) c.innerHTML = ""; });
+
+    const totalPages = Math.ceil(filteredReservationData.length / pageSize);
+
+    if (totalPages <= 1) return;
+
+    const createButton = (text, isDisabled, onClick) => {
+      const btn = document.createElement('button');
+      btn.textContent = text;
+      btn.disabled = isDisabled;
+      btn.onclick = onClick;
+      return btn;
+    };
+
+    containers.forEach(container => {
+      if (!container) return;
+
+      const prevBtn = createButton('이전', currentPage === 1, () => {
+        currentPage--; 
+        renderReservationTable(); 
+        renderPagination(); 
+      });
+      container.appendChild(prevBtn);
+
+      for (let i = 1; i <= totalPages; i++) {
+        const pageBtn = createButton(i, false, () => {
+           currentPage = i; 
+           renderReservationTable(); 
+           renderPagination();
+        });
+        
+        if (i === currentPage) {
+          pageBtn.classList.add('active');
+        }
+        container.appendChild(pageBtn);
+      }
+      
+      const nextBtn = createButton('다음', currentPage === totalPages, () => {
+        currentPage++; 
+        renderReservationTable(); 
+        renderPagination(); 
+      });
+      container.appendChild(nextBtn);
+    });
+  }
+  
+  /* --- 7. Admin Actions (Reservation) --- */
+  async function handleChangeStatus(id, newStatusString) {
+    markAsRead(id);
+
+    const isEnabled = (newStatusString === 'true');
+    const statusText = isEnabled ? '예약' : '취소';
+
+    if (confirm(`상태를 '${statusText}'(으)로 변경하시겠습니까?`)) {
+      lastUpdatedId = id;
+
+      showSpinner(true);
+
+      try {
+        const result = await runGoogleScript('updateReservationStatus', id, isEnabled);
+        
+        onStatusUpdateComplete(result);
+        
+      } catch (error) {
+        onFailure(error);
+      }
+    } else {
+      renderReservationTable(); 
+    }
+  }
+
+  function onStatusUpdateComplete(result) {
+    if (result && result.success === false) {
+      alert("상태 변경 실패: " + result.error);
+      showSpinner(false);
+      return;
+    }
+    
+    handleSearch(true); 
+  }
+
+  function onMessageSentAtUpdateComplete(result) {
+    if (result && result.success === false) {
+      alert("상태 변경 실패: " + result.error);
+      showSpinner(false);
+      return;
+    }
+    
+    handleSearch(true); 
+  }
+  
+  function sendKakao(event, reservationId) {
+    try {
+      // 1. 이벤트 전파 및 기본 동작 방지 (모바일 터치 이슈 방지)
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      if (userLevel < 2) {
+        throw new Error('비정상 접근 - 권한없음');
+      };
+
+      const targetReservation = allReservationData.find(reservation => reservation.id === reservationId);
+      if (!targetReservation) {
+        throw new Error('예약 정보를 찾을 수 없습니다.');
+      }
+
+      const kData = targetReservation.kakaoData;
+      const shareText = `${kData.title}\n\n${kData.body}`;
+      const shareUrl = kData.link;
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      markAsRead(reservationId);
+
+      if (isMobile && navigator.share) {
+        navigator.share({
+          title: kData.title,
+          text: shareText,
+        })
+        .then(() => console.log('공유 성공'))
+        .catch((error) => {
+          console.log('공유 실패/취소', error);
+          // 취소가 아니라 진짜 에러인 경우 안내 (AbortError는 사용자가 닫은 것)
+          if (error.name !== 'AbortError') {
+            throw new Error('공유하기 오류: ' + error.message);
+          }
+        });
+      } else {
+        const shareData = {
+          objectType: 'text',
+          text: shareText,
+          link: {
+            webUrl: shareUrl,
+            mobileWebUrl: shareUrl,
+          },
+          buttons: [
+            {
+              title: '예약 확인',
+              link: {
+                webUrl: shareUrl,
+                mobileWebUrl: shareUrl,
+              },
+            },
+          ],
+          serverCallbackArgs: {
+            reservation_id: reservationId // 예약 UUID
+          }
+        };
+
+        Kakao.Share.sendDefault(shareData);
+      }
+    } catch (err) {
+      alert('카톡 전송 실패: ' + err.message);
+    }
+  }
+
+  function markAsRead(id) {
+    const item = allReservationData.find(d => d.id === id);
+    if (!item) return;
+
+    if (item.is_read === false) {
+      google.script.run
+        .withFailureHandler(e => console.error("읽음 처리 실패", e))
+        .markAsRead(id);
+
+      item.is_read = true;
+
+      const trEl = document.getElementById(`tr-${id}`);
+      const cardEl = document.getElementById(`card-${id}`);
+
+      const removeBadge = (el) => {
+        if (!el) return;
+        el.classList.remove('row-unread');
+        const badge = el.querySelector('.badge-new');
+        if (badge) badge.remove();
+      };
+
+      removeBadge(trEl);
+      removeBadge(cardEl);
+    }
+  }
+
+  async function confirmKakao(e, reservationId) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    if (userLevel < 2) {
+      throw new Error('비정상 접근 - 권한없음');
+    };
+
+    showSpinner(true);
+
+    try {
+      const result = await runGoogleScript('updateReservationMessageSentAt', reservationId);
+      
+      onMessageSentAtUpdateComplete(result);
+      
+    } catch (error) {
+      onFailure(error);
+    }
+  }
+
+  function sendKakaoFromModal(e, reservationId) {
+    if (!currentModalId) return;
+    sendKakao(e, currentModalId); // 기존 함수 재활용
+  }
+  
+  /* --- 8. Edit Modal --- */
+  function openEditModal(id) {
+    console.log('모달 열기:', currentModalId);
+    currentModalId = id;
+
+    const item = allReservationData.find(d => d.id === currentModalId);
+    if (!item) return;
+
+    markAsRead(currentModalId);
+    
+    document.body.classList.add('modal-open');
+
+    const modalContent = document.getElementById('reservation-modal-content');
+    if (modalContent) {
+      if (item.status === false) { // 취소 상태
+        modalContent.classList.add('cancelled-mode');
+      } else {
+        modalContent.classList.remove('cancelled-mode');
+      }
+    }
+
+    document.getElementById('modal-id').value = item.id;
+    document.getElementById('modal-row').value = item.row;
+
+    // Branch Select
+    const branchSelect = document.getElementById('modal-branch');
+    if (branchSelect) {
+      branchSelect.innerHTML = '<option value="">지점 선택</option>';
+      branchSelect.className = 'custom-select';
+      const branches = dropdownData.branches || [];
+      branches.forEach(branch => {
+        const option = document.createElement('option');
+        option.value = branch.id;
+        option.textContent = branch.name;
+        if (branch.id === item.branch_id) option.selected = true;
+        branchSelect.appendChild(option);
+      });
+    }
+
+    const statusSelect = document.getElementById('modal-status');
+    if (statusSelect) {
+      statusSelect.value = item.status.toString();
+      statusSelect.className = 'custom-select';
+
+      if (item.status === true) {
+        statusSelect.classList.add('status-text-green');
+      } else {
+        statusSelect.classList.add('status-text-red');
+      }
+    }
+
+    // Date Min/Max
+    const dateInput = document.getElementById('modal-visitDate');
+    if (dateInput) {
+      dateInput.value = item.visit_date;
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      
+      const maxDate = new Date();
+      maxDate.setMonth(maxDate.getMonth() + 1);
+      const yyyyMax = maxDate.getFullYear();
+      const mmMax = String(maxDate.getMonth() + 1).padStart(2, '0');
+      const ddMax = String(maxDate.getDate()).padStart(2, '0');
+      
+      dateInput.min = `${yyyy}-${mm}-${dd}`;
+      dateInput.max = `${yyyyMax}-${mmMax}-${ddMax}`;
+    }
+
+    // Time Select
+    const timeSelect = document.getElementById('modal-visitTime');
+    if (timeSelect) {
+      timeSelect.innerHTML = '<option value="">시간 선택</option>';
+      timeSelect.className = 'custom-select';
+
+      const slots = dropdownData.slots || [];
+      const sortedSlots = [...slots].sort((a, b) => a.time.localeCompare(b.time));
+      
+      let isTimeInList = false;
+      sortedSlots.forEach(slot => {
+        const option = document.createElement('option');
+        option.value = slot.time;
+        option.textContent = slot.time;
+        if (slot.time === item.visit_time) {
+          option.selected = true;
+          isTimeInList = true;
+        }
+        timeSelect.appendChild(option);
+      });
+
+      if (item.visit_time && !isTimeInList) {
+         const option = document.createElement('option');
+         option.value = item.visit_time;
+         option.textContent = `${item.visit_time} (목록에 없음)`;
+         option.selected = true;
+         timeSelect.appendChild(option);
+      }
+    }
+
+    // Other Fields
+    document.getElementById('modal-name').value = item.customer_name;
+    document.getElementById('modal-pax').value = item.pax;
+    document.getElementById('modal-notes').value = item.notes;
+    document.getElementById('modal-email').value = item.email;
+    document.getElementById('modal-requestDate').value = item.request_date || '-';
+
+    setModalMode('read');
+    
+    const editBtn = document.getElementById('btn-mode-edit');
+    const kakaoBtn = document.getElementById('btn-modal-kakao');
+
+    if (userLevel < 2) {
+      if(editBtn) editBtn.style.display = 'none';
+      if(kakaoBtn) kakaoBtn.style.display = 'none';
+    } else {
+      if(editBtn) editBtn.style.display = 'inline-block';
+      if(kakaoBtn) {
+        kakaoBtn.style.display = 'inline-block';
+        kakaoBtn.onclick = (e) => sendKakaoFromModal(e, currentModalId);
+      }
+    }
+
+    resModal.style.display = 'flex';
+  }
+  
+  function closeEditModal() {
+    resModal.style.display = 'none';
+
+    document.body.classList.remove('modal-open');
+  }
+  
+  function handleReservationSave(e) {
+    e.preventDefault(); 
+    
+    const visitTime = document.getElementById('modal-visitTime').value;
+    const visitDate = document.getElementById('modal-visitDate').value;
+    const branchId = document.getElementById('modal-branch').value;
+    const statusVal = document.getElementById('modal-status').value; 
+    const isEnabled = (statusVal === 'true');
+
+    if (!visitTime || visitTime === "") {
+      alert("예약 시간을 선택해주세요.");
+      document.getElementById('modal-visitTime').focus();
+      return;
+    }
+    if (!branchId || branchId === "") {
+      alert("지점을 선택해주세요.");
+      return;
+    }
+
+    const reservationData = {
+      id: document.getElementById('modal-id').value,
+      row: parseInt(document.getElementById('modal-row').value, 10),
+      branch_id: branchId,
+      visit_date: visitDate,
+      visit_time: visitTime,
+      customer_name: document.getElementById('modal-name').value,
+      pax: parseInt(document.getElementById('modal-pax').value, 10),
+      notes: document.getElementById('modal-notes').value,
+      email: document.getElementById('modal-email').value,
+      status: isEnabled,
+    };
+    
+    showSpinner(true);
+    resModalSaveBtn.disabled = true;
+    resModalSaveBtn.textContent = "저장 중...";
+    
+    google.script.run
+      .withSuccessHandler(onReservationSaveComplete)
+      .withFailureHandler(onFailure)
+      .updateReservation(reservationData);
+  }
+
+  function onReservationSaveComplete(result) {
+    if (result && result.success === false) {
+      alert("저장 실패: " + result.error);
+      resModalSaveBtn.disabled = false;
+      resModalSaveBtn.textContent = "저장";
+      showSpinner(false);
+      return;
+    }
+
+    closeEditModal();
+    lastUpdatedId = document.getElementById('modal-id').value;
+    handleSearch(true); 
+    
+    resModalSaveBtn.disabled = false;
+    resModalSaveBtn.textContent = "저장";
+  }
+
+  // --- Modal Mode Logic ---
+  function enableEditMode() {
+    setModalMode('edit');
+  }
+
+  function cancelEditMode() {
+    openEditModal(currentModalId);
+  }
+
+  function setModalMode(mode) {
+    const form = document.getElementById('edit-modal-form');
+    const inputs = form.querySelectorAll('input, select, textarea');
+    const btnGroupRead = document.getElementById('modal-btn-group-read');
+    const btnGroupEdit = document.getElementById('modal-btn-group-edit');
+    const modalTitle = document.getElementById('modal-title');
+
+    if (mode === 'read') {
+      if(modalTitle) modalTitle.textContent = "예약 상세 정보";
+      inputs.forEach(input => {
+        input.disabled = true; 
+        input.style.border = "none";
+        input.style.backgroundColor = "transparent";
+        input.style.color = "#333";
+      });
+      if(btnGroupRead) btnGroupRead.style.display = 'flex';
+      if(btnGroupEdit) btnGroupEdit.style.display = 'none';
+    } else {
+      if(modalTitle) modalTitle.textContent = "예약 정보 수정";
+      inputs.forEach(input => {
+        const name = input.name;
+        const id = input.id;
+        if (name === 'requestDate' || id === 'modal-id' || id === 'modal-row') return; 
+        
+        input.disabled = false; 
+        input.style.border = "1px solid #ccc";
+        input.style.backgroundColor = "#fff";
+
+        if (input.id === 'modal-status') {
+          updateModalStatusColor(input);
+        }
+      });
+      if(btnGroupRead) btnGroupRead.style.display = 'none';
+      if(btnGroupEdit) btnGroupEdit.style.display = 'flex';
+    }
+  }
+
+  function updateModalStatusColor(selectEl) {
+    selectEl.classList.remove('status-text-green', 'status-text-red');
+    
+    if (selectEl.value === 'true') {
+      selectEl.classList.add('status-text-green');
+    } else {
+      selectEl.classList.add('status-text-red');
+    }
+  }
+
+  /* --- 9. Admin Logic --- */
+  async function loadAdminInitialData(initialSheetName, keepSpinner = false) {
+    const contentEl = document.getElementById('settings-content');
+    if (contentEl) contentEl.classList.add('loading');
+
+    showSpinner(true);
+
+    try {
+      const userResult = await runGoogleScript('apiGetCurrentUser');
+      console.log(userResult);
+      const result = await runGoogleScript('getDropdownData', currentUser);
+      onAdminDataLoaded(result, initialSheetName);
+
+      await loadAdminTableData(initialSheetName);
+    } catch (error) {
+      onFailure(error);
+    } finally {
+      if (!keepSpinner) {
+        showSpinner(false);
+      }
+    }
+  }
+  
+  function onAdminDataLoaded(data, sheetName) {
+    try {
+      dropdownData = data; 
+      renderSettingsSidebar();
+      loadAdminTableData(sheetName);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function renderSettingsSidebar() {
+    const sidebarList = document.getElementById('settings-sidebar-list');
+    const sidebarMobile = document.getElementById('settings-sidebar-mobile');
+    sidebarList.innerHTML = '';
+    sidebarMobile.innerHTML = '<strong>설정 메뉴:</strong> ';
+
+    const role = currentUser.role;
+    const visibleSheets = Object.values(ADMIN_SHEETS).filter(sheet => {
+        if (role === 'admin') return true;
+        if (role === 'manager') return ['slot_default', 'slot_override'].includes(sheet.name);
+        return false;
+    });
+
+    if (visibleSheets.length === 0) {
+      sidebarList.innerHTML = '<li><span style="padding:12px;">접근 권한이 없습니다.</span></li>';
+      return;
+    }
+
+    visibleSheets.forEach(sheet => {
+      const li = document.createElement('li');
+      li.innerHTML = `<a href="#" id="nav-${sheet.name}" onclick="event.preventDefault(); loadAdminTableData('${sheet.name}')">${sheet.icon} ${sheet.title}</a>`;
+      sidebarList.appendChild(li);
+      
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.id = `nav-mobile-${sheet.name}`;
+      badge.textContent = sheet.title;
+      badge.onclick = (e) => { e.preventDefault(); loadAdminTableData(sheet.name); };
+      sidebarMobile.appendChild(badge);
+    });
+  }
+
+  async function loadAdminTableData(sheetName) {
+    currentAdminSheet = sheetName;
+    document.getElementById('settings-current-table').textContent = ADMIN_SHEETS[Object.keys(ADMIN_SHEETS).find(key => ADMIN_SHEETS[key].name === sheetName)].title;
+    
+    document.querySelectorAll('#settings-sidebar a').forEach(a => a.classList.remove('active'));
+    document.querySelectorAll('#settings-sidebar-mobile .badge').forEach(b => b.classList.remove('active'));
+    const navItem = document.getElementById(`nav-${sheetName}`);
+    if (navItem) navItem.classList.add('active');
+    const mobileItem = document.getElementById(`nav-mobile-${sheetName}`);
+    if (mobileItem) mobileItem.classList.add('active');
+
+    adminAddBtn.style.display = (sheetName === ADMIN_SHEETS.SLOT_DEFAULT.name) ? 'none' : 'block';
+
+    const contentEl = document.getElementById('settings-content');
+    if (contentEl) contentEl.classList.add('loading');
+
+    showSpinner(true);
+    try {
+      const result = await runGoogleScript('loadAdminTableData', sheetName, currentUser);
+      onAdminTableDataReceived(result); 
+    } catch (error) {
+      onFailure(error);
+    }
+  }
+  
+  function onAdminTableDataReceived(result) {
+    try {
+      if (result && result.success === false) throw new Error(result.error);
+      if (result.headers && result.rows) {
+        currentAdminData = result;
+        renderPivotedSlotTable(result);
+      } else {
+        const [headers, ...rows] = result;
+        currentAdminData = { headers, rows };
+        renderAdminTable(headers, rows);
+      }
+      const contentEl = document.getElementById('settings-content');
+      if (contentEl) contentEl.classList.remove('loading');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      showSpinner(false);
+    }
+  }
+  
+  function renderAdminTable(headers, rows) {
+    const tableContainer = document.getElementById('admin-table-container');
+    const cardContainer = document.getElementById('admin-card-list-container');
+    
+    tableContainer.innerHTML = "";
+    cardContainer.innerHTML = "";
+
+    let displayHeaders = [...headers];
+    let displayRows = [...rows];
+
+    if (currentAdminSheet === ADMIN_SHEETS.SLOT_OVERRIDE.name) {
+      const headerIndexMap = {};
+      headers.forEach((h, i) => headerIndexMap[h] = i);
+
+      displayHeaders = ['id', 'branch_name', 'date', 'time', 'slot', 'reason', 'enabled', '관리'];
+      
+      const branches = dropdownData.branches || [];
+      const slots = dropdownData.slots || [];
+      const branchMap = new Map(branches.map(b => [b.id, b.name]));
+      const slotMap = new Map(slots.map(s => [s.id, s.time]));
+      
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      displayRows = rows
+        .map(row => {
+          const date = row[headerIndexMap['date']];   // Date 객체
+          const timeStr = slotMap.get(row[headerIndexMap['slot_master_id']]); // 예: "15:30"
+          
+          // timeStr을 Date 객체 시간으로 변환
+          const [h, m] = (timeStr || "00:00").split(":").map(Number);
+          const fullDate = new Date(date);
+          fullDate.setHours(h, m, 0, 0);
+          
+          return {
+            id: row[headerIndexMap['id']],
+            branch_name: branchMap.get(row[headerIndexMap['branch_id']]) || 'N/A',
+            time: timeStr || 'N/A',
+            date: date,
+            slot: row[headerIndexMap['slot']],
+            reason: row[headerIndexMap['reason']],
+            enabled: row[headerIndexMap['enabled']],
+
+            __fullDate: fullDate  // 정렬을 위해 숨겨둠
+          };
+        })
+        .filter(r => r.__fullDate >= today)
+        .sort((a, b) => {
+          // 지점명 먼저
+          const branchCompare = a.branch_name.localeCompare(b.branch_name);
+          if (branchCompare !== 0) return branchCompare;
+
+          // fullDate만 비교 (날짜 + 시간 모두 포함)
+          return a.__fullDate - b.__fullDate;
+        })
+        .map(r => {
+          delete r.__fullDate;
+          return r;
+        });
+    } else if (currentAdminSheet === ADMIN_SHEETS.BRANCH.name) {
+      const headerIndexMap = {};
+      headers.forEach((h, i) => headerIndexMap[h] = i);
+      
+      displayHeaders = ['id', 'branch_name_ko', 'branch_name_en', 'location','enabled', '관리'];
+
+      displayRows = rows.map(row => {
+        const newRow = {};
+        newRow.id = row[headerIndexMap['id']];
+        newRow.branch_name_ko = row[headerIndexMap['branch_name_ko']];
+        newRow.branch_name_en = row[headerIndexMap['branch_name_en']];
+        newRow.location = row[headerIndexMap['location']];
+        newRow.enabled = row[headerIndexMap['enabled']];
+        return newRow;
+      });
+    }
+
+    if (displayRows.length === 0) {
+      tableContainer.innerHTML = `<p style="text-align:center; padding:20px;">데이터가 없습니다.</p>`;
+      cardContainer.innerHTML = `<p style="text-align:center; padding:20px;">데이터가 없습니다.</p>`;
+      return;
+    }
+
+    const hiddenHeaders = ['id', 'user_password', 'salt', 'password_hash', 'userpassword', 'created_at', 'updated_at'];
+
+    const tableFragment = document.createDocumentFragment();
+    const cardFragment = document.createDocumentFragment();
+    
+    const table = document.createElement('table');
+    table.className = 'min-w-full';
+    const thead = document.createElement('thead');
+    const tbody = document.createElement('tbody');
+
+    let trHead = '<tr><th style="width:50px;">No.</th>';
+    displayHeaders.forEach(h => {
+       if (!hiddenHeaders.includes(h) && h !== '관리') {
+           trHead += `<th>${getLabel(h)}</th>`;
+       }
+    });
+    trHead += '<th style="width:120px;">관리</th></tr>';
+    thead.innerHTML = trHead;
+    table.appendChild(thead);
+
+    displayRows.forEach((row, index) => {
+        const rowId = (currentAdminSheet === ADMIN_SHEETS.SLOT_OVERRIDE.name) ? row.id : row[0];
+        
+        const processedCells = displayHeaders.map((header, colIndex) => {
+            if (hiddenHeaders.includes(header) || header === '관리') return null;
+            
+            let rawValue;
+            if ([ADMIN_SHEETS.SLOT_OVERRIDE.name, ADMIN_SHEETS.BRANCH.name].includes(currentAdminSheet)) {
+                rawValue = row[header];
+            } else {
+                rawValue = row[colIndex];
+            }
+            
+            if (typeof rawValue === 'boolean') {
+                return rawValue ? '<span style="color:green;">활성</span>' : '<span style="color:red;">비활성</span>';
+            } else if (header.includes('date') || header.includes('time')) {
+                 const formatType = header.includes('date') ? 'date' : 'time';
+                 return formatDate(rawValue, formatType);
+            } else if (header === 'location' && rawValue) {
+                 return `<a href="${rawValue}" target="_blank">구글맵 열기</a>`;
+            }
+            return rawValue;
+        });
+
+        const tr = document.createElement('tr');
+        let trHtml = `<td style="text-align:center;">${index + 1}</td>`;
+        
+        processedCells.forEach(cellHtml => {
+            if (cellHtml !== null) trHtml += `<td>${cellHtml}</td>`;
+        });
+
+        trHtml += `
+          <td style="text-align:center;">
+            <button class="action-btn btn-edit" onclick="openAdminModal('${rowId}')">수정</button>
+            <button class="action-btn btn-delete" onclick="handleAdminDelete('${rowId}')">삭제</button>
+          </td>`;
+        tr.innerHTML = trHtml;
+        tbody.appendChild(tr);
+
+        const card = document.createElement('div');
+        card.className = 'result-card';
+        
+        const validCells = processedCells.filter(c => c !== null);
+        const titleText = validCells[0] ? String(validCells[0]).replace(/<[^>]*>/g, '') : '데이터';
+
+        let cardBody = '';
+        displayHeaders.forEach((header, i) => {
+             if (processedCells[i] === null) return;
+             cardBody += `<p><strong>${getLabel(header)}:</strong> ${processedCells[i]}</p>`;
+        });
+
+        card.innerHTML = `
+          <div class="card-header">
+            <h3>${titleText}</h3>
+          </div>
+          <div class="card-body">${cardBody}</div>
+          <div class="card-actions">
+             <button class="action-btn btn-edit" onclick="openAdminModal('${rowId}')">수정</button>
+             <button class="action-btn btn-delete" onclick="handleAdminDelete('${rowId}')">삭제</button>
+          </div>
+        `;
+        cardFragment.appendChild(card);
+    });
+
+    table.appendChild(tbody);
+    tableFragment.appendChild(table);
+    
+    tableContainer.appendChild(tableFragment);
+    cardContainer.appendChild(cardFragment);
+  }
+  
+  function renderPivotedSlotTable(data) {
+    const { headers, rows } = data;
+    const tableContainer = document.getElementById('admin-table-container');
+    const cardContainer = document.getElementById('admin-card-list-container');
+
+    tableContainer.innerHTML = ""; 
+    cardContainer.innerHTML = ""; 
+
+    const table = document.createElement('table');
+    table.className = 'min-w-full slot-pivot-table';
+    
+    const thead = document.createElement('thead');
+    const trHead = document.createElement('tr');
+
+    headers.forEach(header => {
+      if (header === 'id') return;
+      const th = document.createElement('th');
+      th.textContent = getLabel(header);
+      trHead.appendChild(th);
+    });
+    trHead.innerHTML += `<th>관리</th>`;
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    
+    if (rows.length === 0) {
+      const colCount = headers.length; 
+      tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center;">데이터가 없습니다.</td></tr>`;
+      cardContainer.innerHTML = `<p style="text-align: center; color: #666;">데이터가 없습니다.</p>`;
+    } else {
+      rows.forEach(row => {
+        const tr = document.createElement('tr');
+        const branchId = row.id;
+
+        const tdBranch = document.createElement('td');
+        tdBranch.textContent = row.branch_name;
+        tr.appendChild(tdBranch);
+        
+        headers.forEach(header => {
+          if (header === 'id' || header === 'branch_name') return;
+          
+          const slotData = row.slots[header];
+          const td = document.createElement('td');
+          
+          if (slotData.enabled) {
+            td.textContent = slotData.slot;
+          } else {
+            td.textContent = slotData.slot;
+            td.classList.add('slot-disabled');
+          }
+          tr.appendChild(td);
+        });
+        
+        tr.innerHTML += `
+          <td style="text-align: center;">
+            <button class="action-btn btn-edit" onclick="openAdminModal('${branchId}')">수정</button>
+          </td>`;
+        tbody.appendChild(tr);
+
+        const card = document.createElement('div');
+        card.className = 'result-card';
+
+        let slotsHtml = '<div class="slot-grid">';
+        headers.forEach(header => {
+          if (header === 'id' || header === 'branch_name') return;
+
+          const slotData = row.slots[header];
+          const statusClass = slotData.enabled ? 'enabled' : 'disabled';
+          
+          slotsHtml += `
+            <div class="slot-badge ${statusClass}">
+              <strong>${header}</strong><br>
+              <span>${slotData.slot}명</span>
+            </div>
+          `;
+        });
+        slotsHtml += '</div>';
+
+        card.innerHTML = `
+          <div class="card-header">
+            <h3>${row.branch_name}</h3>
+          </div>
+          <div class="card-body">
+            <p style="margin-bottom:5px; color:#666; font-size:13px;">시간대별 슬롯 설정</p>
+            ${slotsHtml}
+          </div>
+          <div class="card-actions">
+            <button class="action-btn btn-edit" style="width:100%" onclick="openAdminModal('${branchId}')">설정 수정</button>
+          </div>
+        `;
+        cardContainer.appendChild(card);
+      });
+    }
+    
+    table.appendChild(tbody);
+    tableContainer.appendChild(table);
+  }
+  
+  /* --- 10. Admin Modal Logic --- */
+  function openAdminModal(id) {
+    currentAdminEditId = id; 
+    const sheetConfig = ADMIN_SHEETS[Object.keys(ADMIN_SHEETS).find(key => ADMIN_SHEETS[key].name === currentAdminSheet)];
+    
+    let dataObject = null;
+    if (id) {
+      adminModalTitle.textContent = `${sheetConfig.title} 수정`;
+      if (currentAdminSheet === ADMIN_SHEETS.SLOT_DEFAULT.name) {
+        dataObject = currentAdminData.rows.find(row => row.id == id);
+      } else {
+        const headers = currentAdminData.headers;
+        const rowArray = currentAdminData.rows.find(row => row[0] == id);
+        dataObject = headers.reduce((acc, header, index) => {
+          acc[header] = rowArray[index];
+          return acc;
+        }, {});
+      }
+    } else {
+      adminModalTitle.textContent = `${sheetConfig.title} 추가`;
+    }
+    
+    renderAdminFormFields(dataObject);
+    adminModal.style.display = 'flex';
+  }
+  
+  function closeAdminModal() {
+    adminModal.style.display = 'none';
+    adminModalForm.reset();
+    adminModalFields.innerHTML = ""; 
+    currentAdminEditId = null;
+  }
+  
+  function renderAdminFormFields(dataObject) {
+    adminModalFields.innerHTML = ""; 
+    adminModalFields.className = 'modal-body'; 
+    
+    const sheetName = currentAdminSheet;
+    const headers = currentAdminData.headers || [];
+    
+    const data = dataObject || headers.reduce((acc, header) => {
+      acc[header] = (header === 'enabled') ? true : ""; 
+      return acc;
+    }, {});
+
+    const createOptions = (dataArray, currentVal) => dataArray
+      .map(item => {
+        const value = item.id;
+        const text = item.name || item.username || item.time; 
+        return `<option value="${value}" ${value == currentVal ? 'selected' : ''}>${text}</option>`
+      })
+      .join('');
+    
+    const userOptions = createOptions(dropdownData.users, data.user_id);
+    const branchOptions = createOptions(dropdownData.branches, data.branch_id);
+    
+    const slotOptions = (sheetName === ADMIN_SHEETS.SLOT_MASTER.name)
+      ? '' 
+      : createOptions(dropdownData.slots, data.slot_master_id);
+      
+    const slotMasterTimeValue = (sheetName === ADMIN_SHEETS.SLOT_MASTER.name && data.time) 
+      ? formatDate(data.time, 'time') 
+      : (data.time || '');
+
+    if (sheetName === ADMIN_SHEETS.USER.name) {
+      const userPermissions = dropdownData.permissions 
+          ? dropdownData.permissions.filter(p => p.user_id === data.id).map(p => p.branch_id)
+          : [];
+      
+      let branchCheckboxes = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top:5px;">';
+      dropdownData.branches.forEach(branch => {
+          const isChecked = userPermissions.includes(branch.id);
+          branchCheckboxes += `
+            <label style="font-weight:normal; font-size:13px;">
+              <input type="checkbox" name="branch_ids" value="${branch.id}" ${isChecked ? 'checked' : ''}>
+              ${branch.name}
+            </label>`;
+      });
+      branchCheckboxes += '</div>';
+
+      adminModalFields.innerHTML = `
+        <div class="form-group">
+          <label>시스템 ID (UUID)</label>
+          <input type="text" name="id" value="${data.id || ''}" readonly placeholder="자동 생성됩니다">
+        </div>
+        <div class="form-group">
+          <label>로그인 ID</label>
+          <input type="text" name="user_id" value="${data.user_id || ''}" required placeholder="예: admin">
+        </div>
+        <div class="form-group">
+          <label>사용자 이름</label>
+          <input type="text" name="user_name" value="${data.user_name || ''}" required placeholder="예: 홍길동">
+        </div>
+        <div class="form-group">
+          <label>비밀번호</label>
+          <input type="password" name="user_password" placeholder="${data.id ? '변경 시에만 입력' : '필수 입력'}" ${!data.id ? 'required' : ''}>
+        </div>
+        <div class="form-group">
+          <label>역할</label>
+          <select name="role" id="user-role-select" onchange="toggleBranchSelect(this.value)" required>
+            <option value="admin" ${data.role === 'admin' ? 'selected' : ''}>Admin (전체 접근)</option>
+            <option value="manager" ${data.role === 'manager' ? 'selected' : ''}>Manager (지점 관리)</option>
+            <option value="viewer" ${data.role === 'viewer' ? 'selected' : ''}>Viewer (조회 전용)</option>
+          </select>
+        </div>
+        <div class="form-group full-width" id="branch-select-area" style="display: ${data.role === 'admin' ? 'none' : 'block'}">
+          <label>관리/조회 허용 지점</label>
+          <div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto;">
+             ${branchCheckboxes}
+          </div>
+        </div>
+        <div class="form-group full-width">
+          <label class="form-group"><input type="checkbox" name="enabled" ${data.enabled ? 'checked' : ''}> 활성화</label>
+        </div>
+      `;
+    } 
+    else if (sheetName === ADMIN_SHEETS.BRANCH.name) {
+      adminModalFields.innerHTML = `
+        <div class="form-group"><label>지점명 (영문)</label><input type="text" name="branch_name_en" value="${data.branch_name_en || ''}"></div>
+        <div class="form-group"><label>지점명 (한글)</label><input type="text" name="branch_name_ko" value="${data.branch_name_ko || ''}" required></div>
+        <div class="form-group full-width">
+          <label class="form-group"><input type="checkbox" name="enabled" ${data.enabled ? 'checked' : ''}> 활성화</label>
+        </div>
+      `;
+    }
+    else if (sheetName === ADMIN_SHEETS.SLOT_MASTER.name) {
+      adminModalFields.innerHTML = `
+        <div class="form-group">
+          <label>시간</label>
+          <input type="text" name="time" value="${slotMasterTimeValue}" ${data.id ? 'readonly' : ''} required>
+        </div>
+        <div class="form-group">
+          <label class="form-group"><input type="checkbox" name="enabled" ${data.enabled ? 'checked' : ''}> 활성화</label>
+        </div>
+      `;
+    }
+    else if (sheetName === ADMIN_SHEETS.SLOT_DEFAULT.name) {
+      adminModalFields.className = ''; 
+      const timeHeaders = currentAdminData.timeHeaders;
+      let formHtml = `
+        <div class="form-group" style="padding: 0 10px 10px 10px;">
+          <h3>${data.branch_name}</h3>
+          <p>시간대별 슬롯 수와 활성화 여부를 수정합니다.</p>
+        </div>
+        <div id="slot-batch-controls">
+          <div class="slot-batch-row">
+            <label for="batch-slot-input">일괄 적용</label>
+            <input type="number" id="batch-slot-input" placeholder="슬롯 수" min="0">
+            <input type="checkbox" id="batch-enable-checkbox" style="justify-self: center;">
+          </div>
+        </div>
+        <div id="slot-pivot-form-container">
+          <div class="slot-pivot-form-row" style="background: #f4f4f4;">
+            <label>시간</label>
+            <label>슬롯 수</label>
+            <label>활성화</label>
+          </div>
+      `;
+      for (const time of timeHeaders) {
+        const slotKey = time.time; 
+        const slotId = time.id; 
+        const slotData = data.slots[slotKey];
+        formHtml += `
+          <div class="slot-pivot-form-row">
+            <label for="slot_${slotId}">${slotKey}</label>
+            <input type="number" id="slot_${slotId}" name="slot_${slotId}" value="${slotData.slot}" min="0">
+            <input type="checkbox" name="enabled_${slotId}" ${slotData.enabled ? 'checked' : ''} style="justify-self: center;">
+          </div>
+        `;
+      }
+      formHtml += '</div>';
+      adminModalFields.innerHTML = formHtml;
+      const batchSlotInput = document.getElementById('batch-slot-input');
+      const batchEnableCheckbox = document.getElementById('batch-enable-checkbox');
+      const container = document.getElementById('slot-pivot-form-container');
+      batchSlotInput.addEventListener('input', (e) => {
+        const batchValue = e.target.value;
+        if (batchValue === '' || batchValue < 0) return; 
+        container.querySelectorAll('input[type="number"]').forEach(input => {
+          input.value = batchValue;
+        });
+      });
+      batchEnableCheckbox.addEventListener('change', (e) => {
+        const isChecked = e.target.checked;
+        container.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+          checkbox.checked = isChecked;
+        });
+      });
+    }
+    else if (sheetName === ADMIN_SHEETS.SLOT_OVERRIDE.name) {
+      adminModalFields.innerHTML = `
+        <div class="form-group">
+          <label>지점</label>
+          <select name="branch_id" required><option value="">-- 지점 선택 --</option>${branchOptions}</select>
+        </div>
+        <div class="form-group">
+          <label>지정 날짜</label>
+          <input type="date" name="date" value="${data.date ? data.date.split('T')[0] : ''}" required>
+        </div>
+        <div class="form-group">
+          <label>시간</label>
+          <select name="slot_master_id" required><option value="">-- 시간 선택 --</option>${slotOptions}</select>
+        </div>
+        <div class="form-group">
+          <label>슬롯 수</label>
+          <input type="number" name="slot" value="${data.slot || 0}" min="0" required>
+        </div>
+        <div class="form-group full-width">
+          <label>사유</label>
+          <input type="text" name="reason" value="${data.reason || ''}">
+        </div>
+        <div class="form-group full-width">
+          <label class="form-group"><input type="checkbox" name="enabled" ${data.enabled ? 'checked' : ''}> 활성화 (재정의 적용)</label>
+        </div>
+      `;
+    }
+    else if (sheetName === ADMIN_SHEETS.USER_PERMISSION.name) {
+        adminModalFields.innerHTML = `
+        <div class="form-group">
+          <label>사용자</label>
+          <select name="user_id" required><option value="">-- 사용자 선택 --</option>${userOptions}</select>
+        </div>
+        <div class="form-group">
+          <label>지점</label>
+          <select name="branch_id" required><option value="">-- 지점 선택 --</option>${branchOptions}</select>
+        </div>
+        <div class="form-group">
+          <label>권한 타입</label>
+          <input type="text" name="permission_type" value="${data.permission_type || 'default'}" required>
+        </div>
+        <div class="form-group full-width">
+          <label class="form-group"><input type="checkbox" name="enabled" ${data.enabled ? 'checked' : ''}> 활성화</label>
+        </div>
+      `;
+    }
+    else {
+      adminModalFields.innerHTML = `<p>${sheetName} 폼은 아직 구현되지 않았습니다.</p>`;
+    }
+  }
+
+  function toggleBranchSelect(role) {
+    const area = document.getElementById('branch-select-area');
+    if (area) area.style.display = (role === 'admin') ? 'none' : 'block';
+  }
+  
+  function handleAdminSave(e) {
+    e.preventDefault();
+    const formData = new FormData(adminModalForm);
+    const recordData = {};
+    
+    if (currentAdminSheet === ADMIN_SHEETS.SLOT_DEFAULT.name) {
+      const slotsPayload = {}; 
+      const timeHeaders = currentAdminData.timeHeaders;
+      
+      for (const time of timeHeaders) {
+        const slotId = time.id; 
+        const slotValue = formData.get(`slot_${slotId}`);
+        const enabledValue = formData.get(`enabled_${slotId}`) === 'on'; 
+        
+        slotsPayload[slotId] = {
+          slot: parseInt(slotValue, 10) || 0,
+          enabled: enabledValue
+        };
+      }
+      
+      showSpinner(true);
+      adminModalSaveBtn.disabled = true;
+      google.script.run
+        .withSuccessHandler(onAdminSaveComplete)
+        .withFailureHandler(onFailure)
+        .updateSlotDefaultBatch(currentAdminEditId, slotsPayload); 
+        
+      return; 
+    }
+    
+    formData.forEach((value, key) => {
+      if (key === 'branch_ids') {
+        if (!recordData.branch_ids) recordData.branch_ids = [];
+        recordData.branch_ids.push(value);
+      } else {
+        recordData[key] = value;
+      }
+    });
+
+    if (!recordData.branch_ids && currentAdminSheet === ADMIN_SHEETS.USER.name) {
+      const checked = document.querySelectorAll('input[name="branch_ids"]:checked');
+      recordData.branch_ids = Array.from(checked).map(cb => cb.value);
+    }
+    
+    const headers = currentAdminData.headers || [];
+    if (headers.includes('enabled')) {
+      recordData.enabled = formData.get('enabled') === 'on'; 
+    }
+    
+    showSpinner(true);
+    adminModalSaveBtn.disabled = true;
+    
+    let apiFunction = '';
+    let payload = {};
+    
+    if (currentAdminEditId) {
+      apiFunction = 'updateAdminRecord';
+      payload = [currentAdminSheet, currentAdminEditId, recordData];
+    } else {
+      apiFunction = 'addAdminRecord';
+      payload = [currentAdminSheet, recordData];
+    }
+    
+    google.script.run
+      .withSuccessHandler(onAdminSaveComplete)
+      .withFailureHandler(onFailure)
+      [apiFunction](...payload);
+  }
+
+  async function onAdminSaveComplete(result) {
+    if (result.success) {
+      closeAdminModal();
+      await loadAdminInitialData(currentAdminSheet);
+      await loadAdminTableData(currentAdminSheet);
+    } else {
+      alert('저장 실패: ' + result.error);
+    }
+    showSpinner(false);
+    adminModalSaveBtn.disabled = false;
+  }
+  
+  function handleAdminDelete(id) {
+    if (currentAdminSheet === ADMIN_SHEETS.SLOT_DEFAULT.name) {
+      alert('기본 슬롯은 이 화면에서 삭제할 수 없습니다.');
+      return;
+    }
+    
+    if (!confirm(`[${currentAdminSheet}]에서 ID [${id}] 항목을 정말 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
+      return;
+    }
+    
+    showSpinner(true);
+    google.script.run
+      .withSuccessHandler(onAdminDeleteComplete)
+      .withFailureHandler(onFailure)
+      .deleteAdminRecord(currentAdminSheet, id);
+  }
+  
+  function onAdminDeleteComplete(result) {
+    if (result.success) {
+      loadAdminTableData(currentAdminSheet);
+    } else {
+      alert('삭제 실패: ' + result.error);
+      showSpinner(false);
+    }
+  }
+
+  /* --- Utility --- */
+  function showSpinner(show) {
+    spinner.style.display = show ? 'flex' : 'none';
+  }
+  
+  function onFailure(error) {
+    alert("오류: " + error.message);
+    showSpinner(false);
+    resModalSaveBtn.disabled = false;
+    resModalSaveBtn.textContent = "저장";
+    adminModalSaveBtn.disabled = false;
+    adminModalSaveBtn.textContent = "저장";
+  }
+
+  function formatDate(isoString, type = 'datetime') {
+    if (!isoString) return '';
+    try {
+      if (type === 'time' && isoString.includes(':') && !isoString.includes('T')) return isoString;
+      const date = new Date(isoString);
+      if (isNaN(date.getTime())) return type === 'time' ? isoString : 'Invalid Date';
+
+      const year = date.getFullYear();
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const day = date.getDate().toString().padStart(2, '0');
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      
+      if (type === 'time') return `${hours}:${minutes}`;
+      if (type === 'date') return `${year}-${month}-${day}`;
+      return `${year}-${month}-${day} ${hours}:${minutes}`;
+    } catch (e) {
+      return isoString;
+    }
+  }
+
+  function runGoogleScript(functionName, ...args) {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        [functionName](...args);
+    });
+  }
+</script>
