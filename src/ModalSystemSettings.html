@@ -1,0 +1,239 @@
+<!-- ModalSystemSettings.html (사용자, 지점, 슬롯 설정을 위한 공통 모달) -->
+<div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+  v-if="activeSystemData && localData">
+  <div class="p-6">
+    <!-- Header -->
+    <div class="flex justify-between items-center border-b pb-4 mb-4">
+      <h2 class="text-2xl font-bold text-red-800">
+        {{ modalTitle }}
+      </h2>
+      <button @click="closeModal('system')" class="text-gray-400 hover:text-gray-600">
+        <i class="ph ph-x text-2xl"></i>
+      </button>
+    </div>
+
+    <!-- Content: Dynamic Form -->
+    <form @submit.prevent="handleSystemSave">
+      <div class="space-y-6">
+
+        <!-- 1. 사용자 관리 폼 -->
+        <template v-if="activeSystemData.type === 'user'">
+          <div class="space-y-4">
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">구글 이메일</label>
+                <input
+                  type="email"
+                  v-model="localData.user_email"
+                  :readonly="activeSystemData.mode === 'edit'"
+                  placeholder="접근할 구글 계정 이메일"
+                  class="w-full border rounded-lg p-3 bg-white focus:ring-red-500 focus:border-red-500 disabled:bg-gray-100"
+                  required
+                >
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">이름</label>
+                <input
+                  type="text"
+                  v-model="localData.user_name"
+                  class="w-full border rounded-lg p-3 bg-white focus:ring-red-500 focus:border-red-500"
+                  required
+                >
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">권한</label>
+                <select v-model="localData.role" class="w-full border rounded-lg p-3 bg-white focus:ring-red-500 focus:border-red-500">
+                  <option value="admin">Admin (전체 관리자)</option>
+                  <option value="manager">Manager (지점 관리자)</option>
+                  <option value="viewer">Viewer (조회 전용)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">계정 상태</label>
+                <select v-model="localData.enabled" class="w-full border rounded-lg p-3 bg-white focus:ring-red-500 focus:border-red-500">
+                  <option :value="true">활성</option>
+                  <option :value="false">비활성</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- 지점 권한 설정 (Admin이 아닐 경우) -->
+            <div v-if="localData.role !== 'admin'" class="p-4 bg-gray-50 rounded-lg">
+              <h4 class="text-base font-semibold mb-2">지점 접근 권한</h4>
+              <div class="flex flex-wrap gap-3">
+                <div v-for="branch in branches" :key="branch.id" class="flex items-center">
+                  <input
+                    type="checkbox"
+                    :id="'user-branch-' + branch.id"
+                    :value="branch.id"
+                    v-model="userBranchIds"
+                    class="h-4 w-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                  >
+                  <label :for="'user-branch-' + branch.id" class="ml-2 text-sm text-gray-700">{{ branch.branch_name_ko }}</label>
+                </div>
+              </div>
+              <p v-if="localData.role === 'manager' && userBranchIds.length === 0" class="mt-2 text-sm text-red-500">
+                매니저 권한이므로 최소 1개 이상의 지점을 선택해야 합니다.
+              </p>
+            </div>
+          </div>
+        </template>
+
+        <!-- 2. 지점 관리 폼 (Location Removed) -->
+        <template v-else-if="activeSystemData.type === 'branch'">
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">지점명 (한글)</label>
+              <input type="text" v-model="localData.branch_name_ko" class="w-full border rounded-lg p-3" required>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">지점명 (영문 - 캘린더 연동 KEY)</label>
+              <input type="text" v-model="localData.branch_name_en" class="w-full border rounded-lg p-3" required>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">지점 캘린더 ID</label>
+              <input type="text" v-model="localData.calendar_id" class="w-full border rounded-lg p-3" required>
+            </div>
+            <!-- [FIX] Location Field Removed -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">지점 상태</label>
+              <select v-model="localData.enabled" class="w-full border rounded-lg p-3">
+                <option :value="true">활성</option>
+                <option :value="false">비활성</option>
+              </select>
+            </div>
+          </div>
+        </template>
+
+        <!-- 3. 슬롯 커스텀 설정 폼 (단일 오버라이드) -->
+        <template v-else-if="activeSystemData.type === 'slot' && activeSystemData.mode === 'edit'">
+          <h3 class="text-lg font-semibold text-gray-700">슬롯 커스텀 설정 (Override)</h3>
+          <div class="p-4 bg-amber-50 rounded-lg">
+            <p class="text-sm font-medium mb-2">{{ getBranchName(localData.branch_id) }} - {{ formatDate(localData.date, 'date') }}</p>
+            <p class="text-sm font-medium text-red-700">시간대: {{ getSlotTime(localData.slot_master_id) }}</p>
+          </div>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">슬롯 수</label>
+              <input type="number" v-model.number="localData.slot" min="0" class="w-full border rounded-lg p-3" required>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">사유</label>
+              <input type="text" v-model="localData.reason" class="w-full border rounded-lg p-3">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">활성화</label>
+              <select v-model="localData.enabled" class="w-full border rounded-lg p-3">
+                <option :value="true">활성 (적용)</option>
+                <option :value="false">비활성 (기본 설정으로 돌아감)</option>
+              </select>
+            </div>
+          </div>
+        </template>
+
+        <!-- 4. 슬롯 일괄 설정 폼 (Batch) -->
+        <template v-else-if="activeSystemData.type === 'slot' && activeSystemData.mode === 'batch'">
+          <h3 class="text-lg font-semibold text-gray-700">
+             {{ activeSystemData.batchType === 'override' ? '날짜별 커스텀 슬롯 일괄 설정' : '지점 기본 슬롯 일괄 설정' }}
+          </h3>
+          
+          <div class="p-4 bg-gray-50 rounded-lg mb-4">
+            <p class="text-base font-medium mb-1">
+              <span class="text-gray-500 font-normal">대상 지점:</span> 
+              {{ getBranchName(activeSystemData.data.branch_id) }}
+            </p>
+            <p v-if="activeSystemData.batchType === 'override'" class="text-base font-medium mb-1">
+               <span class="text-gray-500 font-normal">대상 날짜:</span> 
+               {{ formatDate(activeSystemData.data.date, 'date') }}
+            </p>
+            
+            <p class="text-sm text-red-700 mt-2 flex items-start">
+               <i class="ph ph-info mr-1.5 mt-0.5"></i>
+               <span v-if="activeSystemData.batchType === 'override'">
+                  해당 날짜({{ formatDate(activeSystemData.data.date, 'date') }})의 슬롯 설정을 덮어씁니다. <br>
+                  (이 설정은 <strong>기본 슬롯보다 우선 적용</strong>됩니다.)
+               </span>
+               <span v-else>
+                  이 설정은 해당 지점의 <strong>모든 날짜</strong>에 적용되는 <strong>기본 슬롯(Default)</strong>을 영구적으로 수정합니다.
+               </span>
+            </p>
+          </div>
+
+          <!-- Batch Edit Table -->
+          <div class="mt-4 border border-gray-200 rounded-lg overflow-hidden">
+            <div class="flex items-end gap-2 mb-2 p-2 bg-gray-100 rounded">
+                 <div class="flex-1">
+                     <label class="text-xs font-bold text-gray-500">일괄 입력값 (슬롯 수)</label>
+                     <input type="number" id="batch-input" class="w-full border p-1 rounded text-sm" placeholder="예: 4">
+                 </div>
+                 <button type="button" 
+                    @click="() => { 
+                       const val = document.getElementById('batch-input').value; 
+                       if(val) slotBatchPayload.masterSlots.forEach(s => s.slot = Number(val)); 
+                    }"
+                    class="px-3 py-1.5 bg-gray-600 text-white rounded text-xs hover:bg-gray-700"
+                 >적용</button>
+             </div>
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">시간대</th>
+                  <th class="px-4 py-2 text-center text-xs font-medium text-gray-500">슬롯 수</th>
+                  <th class="px-4 py-2 text-center text-xs font-medium text-gray-500">활성 여부</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr v-for="slot in slotBatchPayload.masterSlots" :key="slot.id">
+                  <td class="px-4 py-2 whitespace-nowrap text-sm font-semibold">{{ getSlotTime(slot.id) }}</td>
+                  <td class="px-4 py-2 whitespace-nowrap text-center">
+                    <input
+                      type="number"
+                      v-model.number="slot.slot"
+                      min="0"
+                      class="w-16 p-1 border rounded text-center text-sm focus:ring-red-500 focus:border-red-500"
+                    >
+                  </td>
+                  <td class="px-4 py-2 whitespace-nowrap text-center">
+                    <select v-model="slot.enabled" class="p-1 border rounded text-sm focus:ring-red-500 focus:border-red-500">
+                      <option :value="true">ON</option>
+                      <option :value="false">OFF</option>
+                    </select>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+
+      </div>
+
+      <!-- Footer: Save/Close Buttons -->
+      <div class="flex justify-end space-x-3 border-t pt-4 mt-6">
+        <button
+          type="button"
+          @click="closeModal('system')"
+          class="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+        >
+          닫기
+        </button>
+        <button
+          type="submit"
+          class="px-5 py-2 bg-red-800 text-white rounded-lg hover:bg-red-900 transition font-semibold"
+        >
+          {{ activeSystemData.mode === 'create' ? '등록' : '저장' }}
+        </button>
+      </div>
+    </form>
+
+    <!-- Delete Button (Edit Mode Only - User) -->
+    <div v-if="activeSystemData.mode === 'edit' && activeSystemData.type === 'user'" class="mt-4 border-t pt-4 text-right">
+      <button @click="confirmDelete" class="text-sm text-red-600 hover:text-red-800 flex items-center justify-end w-full">
+        <i class="ph ph-trash mr-1"></i> 영구 삭제
+      </button>
+    </div>
+  </div>
+</div>

@@ -1,213 +1,231 @@
 /**
- * [트리거 설정 가이드]
- * 1. Apps Script 편집기 좌측 '트리거(시계 아이콘)' 클릭
- * 2. '+ 트리거 추가' 클릭
- * 3. 실행할 함수: processPendingReservation
- * 4. 이벤트 소스: 시간 기반
- * 5. 이벤트 유형: 분 단위 타이머
- * 6. 분 간격: 1분마다 (사용자 요청사항)
+ * [ReservationBatch] 1분 주기 트리거 (Entry Point)
+ * - 신규 예약 감지 -> DB 이관 -> 캘린더 생성 -> 메일 발송
+ * - 예약금 정책(9인 이상) 자동 적용
  */
 function processPendingReservation() {
-  Logger.log(`[TimeDriven] 신규 예약 스캔 시작...`);
+  Logger.log(`[Batch] Start processing...`);
   
-  // 1. 시트 및 범위 설정
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const responseSheet = ss.getSheetByName(SHEET_NAMES.RAW_REQUEST);
+  const ss = Util.getSpreadsheet();
+  const resSheet = ss.getSheetByName(Config.SHEET_NAMES.RAW_REQUEST); // Responses
+  const dbSheet = ss.getSheetByName(Config.SHEET_NAMES.RESERVATION); // reservation
 
-  // 데이터가 있는지 확인 (헤더 제외)
-  const lastRow = responseSheet.getLastRow();
-  if (lastRow < 2) {
-    Logger.log(`[TimeDriven] 처리할 데이터가 없어 종료합니다.`);
+  if (!resSheet || !dbSheet) {
+    Logger.log('[Batch] Sheet not found.');
     return;
   }
 
-  // 2. 데이터 전체 로드 (속도 최적화)
-  // A열(지점명) ~ L열(Response ID)까지 가져옴
-  // L열이 12번째 컬럼임
-  const range = responseSheet.getRange(2, 1, lastRow - 1, 12);
-  const values = range.getValues();
+  // 데이터 로드 (속도를 위해 전체 로드 후 메모리 처리)
+  const dataRange = resSheet.getDataRange();
+  const values = dataRange.getValues();
+  // const headers = values[0]; // 헤더는 참고용
 
+  // Responses 시트의 컬럼 인덱스 (0-based)
+  // A=0(Branch), C=2(Start), D=3(End), F=5(Name), G=6(Email), H=7(Notes), I=8(Pax), K=10(ReqDate), L=11(ID)
+  const IDX = {
+    BRANCH: 0,
+    START: 1,
+    END: 2,
+    NAME: 4,
+    EMAIL: 5,
+    PHONE: 6,
+    NOTES: 7,
+    PAX: 8,
+    REQ_DATE: 10,
+    RES_ID: 11
+  };
+  
   let processedCount = 0;
 
-  // 3. 행 순회
-  for (let i = 0; i < values.length; i++) {
-    const rowData = values[i];
-    
-    // 인덱스: 0(A, Branch), 11(L, Response ID)
-    const branchName = rowData[0];
-    const responseId = rowData[11];
+  // 1행은 헤더이므로 1부터 시작
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const responseId = row[IDX.RES_ID]; 
+    const branchName = row[IDX.BRANCH];
 
-    // L열(Response ID)이 비어있고, A열(지점명)이 있는 경우 신규 예약으로 판단
+    // [조건] Response ID가 없고 지점명이 있는 경우 = 신규 예약
     if (!responseId && branchName) {
-      const currentRow = i + 2; // 실제 시트 행 번호
-
-      Logger.log(`[TimeDriven] ${currentRow}행 신규 예약 발견. 처리 시작...`);
+      const rowIndex = i + 1; // 실제 시트 행 번호 (1-based)
       try {
-        // 처리 함수 호출
-        processNewReservation(currentRow);
+        processSingleReservation(row, rowIndex, resSheet, dbSheet, IDX);
         processedCount++;
-      } catch (err) {
-        Logger.log(`[TimeDriven] ${currentRow}행 처리 중 오류 발생: ${err.message}`);
-        // 오류 발생 시에도 로그만 남기고 다음 행 진행 (배치 중단 방지)
+      } catch (e) {
+        Logger.log(`[Batch] Error at row ${rowIndex}: ${e.message}`);
       }
     }
   }
 
   if (processedCount > 0) {
-    Logger.log(`[TimeDriven] 총 ${processedCount}건의 신규 예약 처리를 완료했습니다.`);
+    Logger.log(`[Batch] Processed ${processedCount} reservations.`);
   }
 }
 
-function processNewReservation(currentRow) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const responseSheet = ss.getSheetByName(SHEET_NAMES.RAW_REQUEST);
-  const reservationSheet = ss.getSheetByName(SHEET_NAMES.RESERVATION); // 웹앱 연동용 시트
+/**
+ * 단일 예약 건 처리 로직
+ */
+function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
+  // 1. 데이터 파싱
+  const rawData = {
+    branchName: row[idx.BRANCH],
+    startDate: row[idx.START],
+    endDate: row[idx.END],
+    customerName: row[idx.NAME],
+    email: row[idx.EMAIL],
+    phoneNumber: row[idx.PHONE],
+    notes: row[idx.NOTES] || '',
+    pax: Number(row[idx.PAX]),
+    bookingRequestDate: row[idx.REQ_DATE]
+  };
 
-  // --- 1. Responses 시트 데이터 읽기 ---
-  // (컬럼 위치는 상수 파일에 정의되어 있다고 가정, 없다면 직접 숫자로 지정 필요)
-  const branchName = responseSheet.getRange(BRANCH_NAME_COLUMN + currentRow).getValue();
-  const reservationStartDate = responseSheet.getRange(START_DATE_COLUMN + currentRow).getValue();
-  const reservationEndDate = responseSheet.getRange(END_DATE_COLUMN + currentRow).getValue();
-  const customerName = responseSheet.getRange(CUSTOMER_NAME_COLUMN + currentRow).getValue();
-  const customerEmailAddress = responseSheet.getRange(CUSTOMER_EMAIL_ADDRESS_COLUMN + currentRow).getValue();
-  const customerNotes = responseSheet.getRange(CUSTOMER_NOTES_COLUMN + currentRow).getValue() || '';
-  const numberOfPeople = responseSheet.getRange(NUMBER_OF_PEOPLE_COLUMN + currentRow).getValue();
-  const bookingRequestDate = responseSheet.getRange(BOOKING_REQUEST_DATE_COLUMN + currentRow).getValue();
-  
   // 필수 값 검증
-  if (!branchName || !reservationStartDate || !reservationEndDate || !customerName || !customerEmailAddress || !numberOfPeople) {
-    Logger.log(`[processNewReservation] ${currentRow}행 필수 정보 누락.`);
+  if (!rawData.branchName || !rawData.startDate || !rawData.customerName) {
+    Logger.log(`[Batch] Missing required fields at row ${rowIndex}`);
     return;
   }
 
-  if (branchName === 'Group Reservation') {
-    Logger.log(`[processNewReservation] ${currentRow}행 그룹 예약은 건너뜁니다.`);
-    return;
+  // 'Group Reservation' 지점명은 무시 (기존 로직 유지)
+  if (rawData.branchName === 'Group Reservation') {
+    Logger.log(`[Batch] Skip 'Group Reservation' at row ${rowIndex}`);
+    return; 
   }
 
-  // 지점 정보 조회
-  const branchInfo = getBranchInfo(branchName, 'en');
+  // 2. 지점 정보 조회 (BranchService)
+  // Responses 시트의 지점명은 영문(branch_name_en)이라고 가정
+  const branches = BranchService.getAllBranches();
+  const branchInfo = branches.find(b => b.branch_name_en === rawData.branchName);
+  
   if (!branchInfo) {
-    throw new Error(`브랜치 정보 조회 실패: ${branchName}`);
+    throw new Error(`Branch not found: ${rawData.branchName}`);
   }
 
-  // --- 2. UUID 생성 및 Responses 시트 업데이트 (중복 방지용 선처리) ---
-  // L열에 UUID를 먼저 박아넣어서, 다음 배치 때 중복 처리되지 않도록 함
-  const newResponseId = Utilities.getUuid();
-  responseSheet.getRange(RESPONSE_ID_COLUMN + currentRow).setValue(newResponseId);
+  // 3. UUID 생성 및 Responses 시트 마킹 (중복 방지)
+  const newResponseId = Util.getUuid();
+  // L열(12번째)에 ID 기록
+  resSheet.getRange(rowIndex, idx.RES_ID + 1).setValue(newResponseId);
 
-  // 데이터 복사 및 형변환
-  const copiedStartDate = new Date(reservationStartDate);
-  const copiedEndDate = new Date(reservationEndDate);
-  const copiedBookingRequestDate = new Date(bookingRequestDate);
-  const copiedNumberOfPeople = Number(numberOfPeople);
+  // 4. 예약금 정책 적용 (v1.4 핵심)
+  let depositStatus = Config.DEPOSIT_STATUS.NA;
+  let depositAmount = 0;
 
-  // --- 3. 캘린더 처리 로직 (원본 확인 -> 대상 생성 -> 슬롯 체크) ---
-  
-  // A. 원본 캘린더 확인
-  let originEvent = null;
-  try {
-    const sourceCal = CalendarApp.getCalendarById(SOURCE_CALENDAR_ID);
-    if (sourceCal) {
-      const events = sourceCal.getEvents(copiedStartDate, copiedEndDate);
-      const targetCandidates = events.filter(event => {
-        const desc = event.getDescription() || '';
-        return event.getTitle() === branchName &&
-               desc.includes(customerName) &&
-               desc.includes(customerEmailAddress);
-      });
-      if (targetCandidates.length > 0) originEvent = targetCandidates[0];
-    }
-  } catch (e) {
-    Logger.log(`[Calendar] 원본 캘린더 확인 중 오류 (무시하고 진행): ${e.message}`);
-  }
-
-  // B. 대상 캘린더(지점)에 이벤트 생성
-  let newEventId = '';
-  let targetCalenderId = branchInfo.calendarId;
-  let targetCal = null;
-
-  try {
-    targetCal = CalendarApp.getCalendarById(targetCalenderId);
-    if (!targetCal) throw new Error(`대상 캘린더 없음: ${targetCalenderId}`);
-
-    const newTitle = `${customerName} (${copiedNumberOfPeople})`;
-    let newDescription = `이름: ${customerName}\n인원: ${copiedNumberOfPeople}\n노트: ${customerNotes}\n이메일: ${customerEmailAddress}\n지점: ${branchInfo.branchNameKo}\n방문일: ${Utilities.formatDate(copiedStartDate, "Asia/Seoul", "MM/dd HH:mm")}`;
+  let maxPaxOverError = false;
+  if (rawData.pax >= Config.DEPOSIT.THRESHOLD_PAX) {
+    depositStatus = Config.DEPOSIT_STATUS.PENDING;
     
-    const newEvent = targetCal.createEvent(newTitle, copiedStartDate, copiedEndDate, { description: newDescription });
-    
-    // 알림 설정 (원본 알림이 있으면 복사, 없으면 기본 30분)
-    if (originEvent) {
-      originEvent.getPopupReminders().forEach(min => newEvent.addPopupReminder(min));
+    // 금액 계산: 9~20명=$100, 21~30명=$200 ...
+    if (rawData.pax <= 19) {
+      depositAmount = Config.DEPOSIT.BASE_AMOUNT;
     } else {
-      newEvent.addPopupReminder(30);
+      const extraPax = rawData.pax - 19;
+      // 1~10명 초과 -> 1단위, 11~20명 초과 -> 2단위
+      const extraUnits = Math.ceil(extraPax / Config.DEPOSIT.UNIT_PAX);
+      depositAmount = Config.DEPOSIT.BASE_AMOUNT + (extraUnits * Config.DEPOSIT.UNIT_AMOUNT);
     }
-    
-    newEventId = newEvent.getId();
-    Logger.log(`[Calendar] 대상 캘린더 이벤트 생성 완료: ${newEventId}`);
 
-  } catch (e) {
-    throw new Error(`대상 캘린더 이벤트 생성 실패: ${e.message}`);
+    if (rawData.pax > 60) {
+      maxPaxOverError = true;
+    }
   }
 
-  // C. 슬롯 체크 및 원본 정리
-  try {
-    const resService = new ReservationService();
-    const maxTimeSlot = resService.getMaxTimeSlot(branchName, copiedStartDate);
-    const currentTimeSlot = resService.getCurrentTimeSlot(branchName, copiedStartDate, targetCal);
-    
-    // 슬롯 여유가 있으면 원본 삭제 (없으면 냅둠 - 중복 방지 로직 등은 별도 고려)
-    if (maxTimeSlot !== -1 && currentTimeSlot !== -1 && currentTimeSlot < maxTimeSlot) {
-      if (originEvent) {
-        originEvent.deleteEvent();
-        Logger.log(`[Calendar] 슬롯 여유로 원본 이벤트 삭제함`);
-      }
-    }
-  } catch (e) {
-    Logger.log(`[Slot] 슬롯 체크 중 오류 (무시): ${e.message}`);
-  }
+  // 5. 이메일 스레드 찾기 (GmailService)
+  const threadId = GmailService.findThreadId({
+    branchName: rawData.branchName,
+    customerName: rawData.customerName,
+    email: rawData.email,
+    pax: row[idx.PAX],
+    phoneNumber: row[idx.PHONE],
+    startDate: new Date(rawData.startDate),
+    notes: rawData.notes,
+    bookingRequestDate: new Date(rawData.bookingRequestDate)
+  });
 
-  // --- 4. 메일 스레드 ID 찾기 ---
-  let mailThreadId = '';
-  try {
-    const mailThreads = new GmailService().findBookingMail(branchName, customerName, customerEmailAddress, numberOfPeople, copiedStartDate, customerNotes, copiedBookingRequestDate);
-    if (mailThreads && mailThreads.length > 0) {
-      mailThreadId = mailThreads[0].getId();
-    }
-  } catch (e) {
-    Logger.log(`[Mail] 메일 스레드 찾기 실패: ${e.message}`);
-  }
-
-  // --- 5. Reservation 시트(웹앱 DB)에 데이터 적재 ---
-  // 요구사항 컬럼 순서:
-  // id, response_id, booking_request_date, branch_id, reservation_date, name, number_of_people, notes, email_address, email_thread_id, calendar_id, event_id, enabled, message_sent_at, created_at, updated_at
-  
+  // 6. DB(reservation) 적재용 객체 생성
   const now = new Date();
-  const reservationRow = [
-    Utilities.getUuid(),          // id (Reservation PK)
-    newResponseId,                // response_id (FK from Responses L column)
-    copiedBookingRequestDate,     // booking_request_date
-    branchInfo.branchId,          // branch_id (지점 UUID)
-    copiedStartDate,              // reservation_date
-    customerName,                 // name
-    copiedNumberOfPeople,         // number_of_people
-    customerNotes,                // notes
-    customerEmailAddress,         // email_address
-    mailThreadId,                 // email_thread_id
-    targetCalenderId,             // calendar_id
-    newEventId,                   // event_id
-    true,                         // enabled
-    false,                        // is_read
-    '',                           // message_sent_at
-    now,                          // created_at
-    now                           // updated_at
-  ];
+  const reservationDate = new Date(rawData.startDate);
+  const requestDate = new Date(rawData.bookingRequestDate);
 
-  reservationSheet.appendRow(reservationRow);
+  const reservationObj = {
+    id: Util.getUuid(),
+    response_id: newResponseId,
+    booking_request_date: requestDate,
+    branch_id: branchInfo.id,
+    reservation_date: reservationDate,
+    customer_name: rawData.customerName,
+    pax: rawData.pax,
+    notes: rawData.notes,
+    phone_number: "'" + rawData.phoneNumber,
+    email: rawData.email,
+    email_thread_id: threadId || '',
+    calendar_id: branchInfo.calendar_id,
+    event_id: '', // 캘린더 생성 후 업데이트
+    enabled: true,
+    is_read: false,
+    
+    // v1.4 신규 컬럼
+    internal_notes: '',
+    deposit_status: depositStatus,
+    deposit_amount: depositAmount,
+    deposit_paid_at: '',
+    deposit_refund_at: '',
+    
+    created_at: now,
+    updated_at: now
+  };
+
+  // 7. 캘린더 이벤트 생성 (Target Calendar)
+  // 이벤트 설명에 필요한 정보 구성
+  const title = `${rawData.customerName} (${rawData.pax})`;
+  const desc = `\n이름: ${rawData.customerName}\n인원: ${rawData.pax}\n노트: ${rawData.notes}\n이메일: ${rawData.email}`;
   
-  // --- 6. Responses 시트 상태 업데이트 (선택사항) ---
-  // L열은 이미 채웠으므로, 만약 별도의 Status 컬럼(M열 등)을 쓴다면 여기서 업데이트
-  // responseSheet.getRange(STATUS_COLUMN + currentRow).setValue("SUCCESS");
+  const eventId = CalendarService.createEvent(branchInfo.calendar_id, title, reservationDate, desc);
   
-  Logger.log(`[processNewReservation] ${currentRow}행 처리 완료.`);
+  if (eventId) {
+    reservationObj.event_id = eventId;
+  }
+
+  // 8. 시트에 저장 (Util Helper 사용)
+  const dbHeaders = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];
+  const dbRow = Util.convertObjectToRow(reservationObj, dbHeaders);
+  dbSheet.appendRow(dbRow);
+
+  // 9. 슬롯 동기화 (Source Calendar) - 마감 여부 체크
+  SlotService.syncSourceSlot(branchInfo.id, reservationDate);
+
+  // 10. 자동 메일 발송 (조건부)
+  if (threadId && depositStatus === Config.DEPOSIT_STATUS.PENDING) {
+    // 템플릿용 데이터
+    const mailData = {
+      customer_name: rawData.customerName,
+      branch_name_en: rawData.branchName, 
+      reservation_date: reservationDate,
+      reservation_time: Util.formatDate(reservationDate, 'time'),
+      pax: rawData.pax,
+      notes: rawData.notes,
+      deposit_amount: depositAmount
+    };
+
+    if (maxPaxOverError === false) {
+      // 예약금 대기 안내 메일 발송
+      const mailResult = GmailService.replyToThreadWithTemplate(
+        threadId, 
+        Config.MAIL_TEMPLATES.DEPOSIT_PENDING, 
+        mailData
+      );
+
+      if (mailResult.success) {
+        Logger.log(`[Batch] Deposit mail sent to ${rawData.customerName}`);
+        GmailService.updateDepositLabel(threadId, GmailService.DEPOSIT_LABELS.PENDING);
+      } else {
+        // 템플릿 비어있음 등으로 발송 안됨
+        Logger.log(`[Batch] Mail send skipped: ${mailResult.message}`);
+      }
+    } else {
+      // 템플릿 비어있음 등으로 발송 안됨
+      Logger.log(`[Batch] Mail send skipped: maxPaxOverError`);
+    }
+  }
+  
+  if (threadId) {
+    // 예약 대기 라벨 처리 (선택사항)
+    GmailService.updateDepositLabel(threadId, GmailService.RESERVATION_LABELS.PENDING);
+  }
 }
