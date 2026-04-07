@@ -1,0 +1,249 @@
+<!-- ModalReservation.html (예약 상세/수정 모달) -->
+<div 
+  class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col relative overflow-hidden"
+  v-if="activeReservation"
+>
+  <!-- [NEW] Local Loading Overlay (Spinner) -->
+  <div 
+    v-if="isModalLoading" 
+    class="absolute inset-0 bg-white/70 flex flex-col items-center justify-center z-50 backdrop-blur-sm transition-opacity duration-200"
+  >
+       <div class="animate-spin rounded-full h-12 w-12 border-4 border-gray-200 border-t-red-800 mb-2"></div>
+       <span class="text-sm font-bold text-red-800 animate-pulse">저장 중...</span>
+  </div>
+
+  <!-- Header (Fixed) -->
+  <div class="p-4 md:p-6 border-b flex-shrink-0 bg-white z-10">
+    <!-- Row 1: Title & Buttons -->
+    <div class="flex justify-between items-start mb-2">
+      <h2 class="text-xl md:text-2xl font-bold text-red-800 flex items-center flex-wrap gap-2">
+        {{ activeReservation.customer_name }}
+        <span 
+          :class="activeReservation.enabled ? 'bg-green-500' : 'bg-red-500'"
+          class="text-white px-2 py-0.5 text-sm rounded-full font-normal whitespace-nowrap"
+        >
+          {{ activeReservation.enabled ? '예약' : '취소' }}
+        </span>
+      </h2>
+      
+      <div class="flex items-center space-x-2 pl-2">
+        <!-- Save Button -->
+        <button 
+          type="button" 
+          @click="handleSaveReservation"
+          :disabled="!isReservationFormValid"
+          :class="{'opacity-50 cursor-not-allowed bg-gray-400': !isReservationFormValid, 'bg-red-800 hover:bg-red-900': isReservationFormValid}"
+          class="px-3 py-1.5 md:px-4 md:py-2 text-white rounded-lg font-bold transition shadow-sm flex items-center whitespace-nowrap text-sm md:text-base"
+        >
+          <i class="ph ph-floppy-disk mr-1.5 md:mr-2"></i> 저장
+        </button>
+        <!-- Close Button -->
+        <button @click="closeModal('reservation')" class="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition">
+          <i class="ph ph-x text-2xl"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Row 2: Meta Info (ID, Date) -->
+    <!-- Mobile: Stacked, Desktop: Inline -->
+    <div class="text-xs text-gray-500 font-mono flex flex-col md:flex-row md:items-center md:space-x-3 space-y-1 md:space-y-0">
+         <span class="break-all">ID: {{ activeReservation.id }}</span>
+         <span class="hidden md:inline text-gray-300">|</span>
+         <span>예약요청일: {{ formatDate(activeReservation.booking_request_date || activeReservation.created_at, 'datetime') }}</span>
+    </div>
+  </div>
+
+  <!-- Scrollable Content -->
+  <div class="p-4 md:p-6 flex-1 overflow-y-auto custom-scrollbar">
+    <form @submit.prevent="handleSaveReservation" class="space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        <!-- Left: Details -->
+        <div class="space-y-4">
+          <h3 class="text-lg md:text-xl font-semibold border-b pb-2 text-gray-700">기본 정보</h3>
+
+          <!-- Branch -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">지점</label>
+            <select v-model="activeReservation.branch_id" class="w-full border border-gray-300 rounded-lg p-3 bg-gray-50 focus:ring-red-500 focus:border-red-500">
+              <option v-for="branch in branches" :value="branch.id" :key="branch.id">
+                {{ branch.branch_name_ko }}
+              </option>
+            </select>
+          </div>
+
+          <!-- Date/Time/Pax (Mobile: 1 column, Desktop: 3 columns) -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">방문 날짜</label>
+              <input type="date" v-model="localDateTime.date" class="w-full border border-gray-300 rounded-lg p-3 bg-white focus:ring-red-500 focus:border-red-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">방문 시간</label>
+              <select 
+                v-model="localDateTime.time" 
+                :class="{'border-red-500 ring-1 ring-red-500 bg-red-50': isSelectionInvalid || isTimeEmpty}"
+                class="w-full border border-gray-300 rounded-lg p-3 bg-white focus:ring-red-500 focus:border-red-500 transition-colors"
+              >
+                 <option value="">시간 선택</option>
+                 <option 
+                   v-for="slot in slotMasters" 
+                   :key="slot.id" 
+                   :value="formatDate(slot.time, 'time')"
+                   :disabled="getSlotValue(activeReservation.branch_id, slot.id, localDateTime.date) <= 0"
+                   :class="{'text-gray-400': getSlotValue(activeReservation.branch_id, slot.id, localDateTime.date) <= 0}"
+                 >
+                   {{ formatDate(slot.time, 'time') }} 
+                   {{ getSlotValue(activeReservation.branch_id, slot.id, localDateTime.date) <= 0 ? '(마감)' : '' }}
+                 </option>
+                 <option v-if="localDateTime.time && !slotMasters.some(s => formatDate(s.time, 'time') === localDateTime.time)" :value="localDateTime.time">
+                    {{ localDateTime.time }} (설정 외)
+                 </option>
+              </select>
+              <p v-if="isTimeEmpty" class="text-xs text-red-600 mt-1 font-bold">
+                 * 필수 선택
+              </p>
+              <p v-else-if="isSelectionInvalid" class="text-xs text-red-600 mt-1 font-bold">
+                 * 마감된 시간대
+              </p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">인원수 (명)</label>
+              <input 
+                 type="number" 
+                 v-model.number="activeReservation.pax" 
+                 min="1" 
+                 :class="{'border-red-500 ring-1 ring-red-500 bg-red-50': isPaxInvalid}"
+                 class="w-full border border-gray-300 rounded-lg p-3 bg-white focus:ring-red-500 focus:border-red-500"
+              >
+              <p v-if="isPaxInvalid" class="text-xs text-red-600 mt-1">
+                 * 1명 이상
+              </p>
+            </div>
+          </div>
+          
+          <!-- Email (Readonly) -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">고객 이메일</label>
+            <input 
+              type="email" 
+              v-model="activeReservation.email" 
+              class="w-full border border-gray-300 rounded-lg p-3 bg-gray-50 text-gray-600 focus:outline-none" 
+              readonly
+            >
+          </div>
+
+          <!-- Phone Number (Readonly) -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">고객 연락처</label>
+            <input 
+              type="text" 
+              v-model="activeReservation.phone_number" 
+              class="w-full border border-gray-300 rounded-lg p-3 bg-gray-50 text-gray-600 focus:outline-none" 
+              readonly
+            >
+          </div>
+          
+          <!-- Notes (Readonly) -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">고객 메모 (Notes)</label>
+            <textarea v-model="activeReservation.notes" rows="3" class="w-full border border-gray-300 rounded-lg p-3 bg-gray-50 text-sm" readonly></textarea>
+          </div>
+          
+          <!-- Internal Notes -->
+          <div>
+            <label class="block text-sm font-medium text-red-700 mb-1">관리자 메모 (Internal Notes)</label>
+            <textarea v-model="activeReservation.internal_notes" rows="3" class="w-full border border-red-300 rounded-lg p-3 bg-red-50 text-sm focus:ring-red-500 focus:border-red-500"></textarea>
+          </div>
+        </div>
+
+        <!-- Right: Actions -->
+        <div class="space-y-6">
+          
+          <!-- Deposit -->
+          <div v-if="activeReservation.pax >= 9" class="p-4 bg-amber-50 rounded-lg shadow-inner border border-amber-200">
+            <h3 class="text-lg md:text-xl font-semibold text-amber-800 flex items-center mb-3 border-b border-amber-200 pb-2">
+              <i class="ph ph-currency-dollar text-2xl mr-2"></i> 예약금 관리
+            </h3>
+            
+            <div class="space-y-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">현재 예약금 상태</label>
+                <select v-model="activeReservation.deposit_status" class="w-full border border-amber-300 rounded-lg p-3 bg-white focus:ring-amber-500 focus:border-amber-500">
+                  <option value="pending">대기 (Pending)</option>
+                  <option value="confirm">확정 (Confirm)</option>
+                  <option value="refund">환불 (Refund)</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">예약금 금액 (USD)</label>
+                <input type="number" v-model.number="activeReservation.deposit_amount" class="w-full border border-amber-300 rounded-lg p-3 bg-white focus:ring-amber-500 focus:border-amber-500">
+              </div>
+            </div>
+          </div>
+          
+          <!-- Email -->
+          <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h3 class="text-lg md:text-xl font-semibold text-gray-700 flex items-center mb-3 border-b border-gray-200 pb-2">
+              <i class="ph ph-envelope-simple text-2xl mr-2"></i> 고객 응대 (Email)
+            </h3>
+            
+            <div class="flex space-x-2">
+              <select v-model="selectedMailTemplateId" class="flex-1 border border-gray-300 rounded-lg p-3 bg-white text-sm focus:ring-red-500 focus:border-red-500">
+                <option value="">-- 발송할 템플릿 선택 --</option>
+                <option v-for="template in mailTemplates" :value="template.id" :key="template.id">
+                  {{ template.template_name.toUpperCase().replace(/_/g, ' ') }}
+                </option>
+              </select>
+              <button 
+                type="button" 
+                @click="sendCustomMail" 
+                :disabled="!selectedMailTemplateId || !activeReservation.email_thread_id"
+                class="px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 transition shadow-sm"
+              >
+                <i class="ph ph-paper-plane text-lg"></i>
+              </button>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">
+              * 메일 발송 시 스레드 ID: {{ activeReservation.email_thread_id || '미확보' }}
+            </p>
+          </div>
+          
+          <!-- Kakao -->
+          <div class="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+              <h3 class="text-lg md:text-xl font-semibold text-gray-700 flex items-center mb-3 border-b border-yellow-200 pb-2">
+               <i class="ph ph-chat-circle-dots text-2xl mr-2 text-yellow-600"></i> 알림톡 (Kakao)
+             </h3>
+             <p class="text-sm text-gray-600 mb-3">고객에게 예약 정보를 카카오톡으로 전송합니다.</p>
+             
+             <!-- Buttons -->
+             <div class="flex justify-end space-x-2">
+               <button 
+                  type="button"
+                  @click="confirmKakao($event, activeReservation)"
+                  class="px-3 py-2 bg-white border border-yellow-400 text-yellow-800 font-bold rounded-lg hover:bg-yellow-50 transition shadow-sm flex items-center text-sm"
+                  title="전송 완료 수동 체크"
+               >
+                  <i class="ph ph-check-circle mr-1"></i> 완료
+               </button>
+               <button 
+                  type="button"
+                  @click="sendKakao($event, activeReservation)"
+                  class="px-4 py-2 bg-yellow-300 hover:bg-yellow-400 text-yellow-900 font-bold rounded-lg transition shadow-sm flex items-center"
+               >
+                  <i class="ph ph-paper-plane-right mr-1"></i> 전송
+               </button>
+             </div>
+             
+             <p v-if="activeReservation.message_sent_at" class="text-xs text-gray-500 mt-2 text-right">
+                최근 전송: {{ formatDate(activeReservation.message_sent_at, 'datetime') }}
+             </p>
+          </div>
+
+        </div>
+      </div>
+    </form>
+    <!-- Footer Removed -->
+  </div>
+</div>

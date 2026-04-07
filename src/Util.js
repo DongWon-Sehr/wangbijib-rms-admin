@@ -1,231 +1,145 @@
 /**
- * 날짜/시간 포맷팅 헬퍼 (Date 객체 및 String 모두 지원)
- * @param {string|Date} value - ISO 8601 문자열 또는 Date 객체
- * @param {'datetime' | 'date' | 'time'} [type='datetime'] - 포맷 타입
- * @returns {string} - 'yyyy-mm-dd hh:ii:ss' or 'yyyy-mm-dd' or 'hh:ii'
+ * [Util] 시스템 전반에서 사용되는 유틸리티 함수 모음 (Singleton)
  */
-function formatDate(value, type = 'datetime') {
-  if (!value) return '';
+const Util = {
+  /**
+   * 스프레드시트 객체 반환
+   */
+  getSpreadsheet() {
+    return SpreadsheetApp.openById(Config.SPREADSHEET_ID);
+  },
 
-  try {
-    // 1. [수정] 입력값이 '문자열'일 때만 특수 예외 처리 ('11:30' 같은 텍스트)
-    if (typeof value === 'string') {
-      if (type === 'time' && value.includes(':') && !value.includes('T')) {
-        return value; 
-      }
+  /**
+   * [Core] 표준 API 응답 객체 생성
+   * 프론트엔드로 데이터를 반환할 때 반드시 이 형식을 사용합니다.
+   * * @param {boolean} success - 성공 여부
+   * @param {any} data - 반환할 데이터 (객체, 배열 등)
+   * @param {string} message - 실패 시 에러 메시지, 성공 시 안내 메시지
+   * @returns {Object} { success, data, message }
+   */
+  createResponse(success, data = null, message = '') {
+    return {
+      success: success == true ? true : false,
+      data: data,
+      message: message
+    };
+  },
+
+  /**
+   * [Core] 시트 데이터를 헤더명(Key) 기반의 객체 배열로 변환 (ORM 역할)
+   * - 빈 시트이거나 헤더만 있는 경우 빈 배열 반환
+   * - Date 객체는 JSON 직렬화를 위해 ISO String으로 변환
+   * * @param {string} sheetName - 시트 이름 (Config.SHEET_NAMES 참조)
+   * @returns {Array<Object>} 객체 배열 [ { id: '...', name: '...' }, ... ]
+   */
+  getSheetDataAsObjects(sheetName) {
+    const ss = this.getSpreadsheet();
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      Logger.log(`[Util] 시트를 찾을 수 없음: ${sheetName}`);
+      return [];
     }
 
-    // 2. Date 객체 변환 (이미 Date면 그대로, 문자열이면 파싱)
-    const date = new Date(value);
-    
-    // 유효성 검사
-    if (isNaN(date.getTime())) {
-      // 문자열인데 파싱 실패했다면 원본 반환 (혹시 모를 텍스트 데이터)
-      return typeof value === 'string' ? value : 'Invalid Date';
-    }
+    const range = sheet.getDataRange();
+    const values = range.getValues();
 
-    // 3. 포맷팅 (KST 기준 아님, Apps Script는 기본적으로 스크립트 설정 타임존을 따름)
-    // 시트에서 가져온 Date 객체는 이미 타임존이 보정된 상태일 확률이 높음.
-    
-    const year = date.getFullYear();
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const seconds = date.getSeconds().toString().padStart(2, '0');
+    // 데이터가 없거나 헤더만 있는 경우
+    if (values.length <= 1) return [];
 
-    if (type === 'time') {
-      return `${hours}:${minutes}`;
-    }
+    const headers = values[0];
+    const rows = values.slice(1);
 
-    if (type === 'date') {
-      return `${year}-${month}-${day}`;
-    }
-
-    // datetime
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-
-  } catch (e) {
-    Logger.log(`formatDate Error: ${e.message}`);
-    return value; // 변환 실패 시 원본 반환
-  }
-}
-
-/**
- * (SERVER) Include other HTML/CSS files if needed.
- */
-function include(filename) {
-  return HtmlService.createHtmlOutputFromFile(filename).getContent();
-}
-
-function findBookingMail(
-  branchName,
-  customerName,
-  customerEmailAddress,
-  numberOfPeople,
-  startDate,
-  notes,
-  bookingRequestDate
-) {
-  // "November 18, 8:30 PM" 포맷 만들기
-  const formattedDateForSubject = formatDateForGmailSubjectQuery(startDate);
-  const formattedDateForBody = formatDateForGmailBodyQuery(startDate);
-
-  const searchStart = new Date(bookingRequestDate.getTime() - 2 * 24 * 60 * 60 * 1000); // D-2
-  const searchEnd = new Date(bookingRequestDate.getTime() + 2 * 24 * 60 * 60 * 1000); // D+2
-  const formattedSearchStart = formatDateForGmailReceivedQuery(searchStart);
-  const formattedSearchEnd = formatDateForGmailReceivedQuery(searchEnd);
-
-  // Gmail 검색 쿼리 배열에 필수 조건 추가
-  const queryParts = [
-    'from:notifications@forms.elfsightmail.com',
-    `subject:("${branchName}" "${formattedDateForSubject}")`,
-    `replyto:${customerEmailAddress}`,
-    `after:${formattedSearchStart}`,
-    `before:${formattedSearchEnd}`,
-    `"Name: ${customerName}"`,
-    `"Email: ${customerEmailAddress}"`,
-    `"Number of People: ${numberOfPeople}"`,
-    `"${formattedDateForBody}"`
-  ];
-
-  // Notes 값이 있으면 포함
-  if (notes && notes.trim() !== "") {
-    queryParts.push(`"Notes: ${notes.trim()}"`);
-  }
-
-  // 쿼리 완성
-  const query = queryParts.join(' ');
-  Logger.log("QUERY: " + query);
-
-  // Gmail 검색
-  const threads = GmailApp.search(query);
-
-  const SEARCH_WINDOW_MINUTES = 5;
-  const filteredThreads = threads.filter(thread => {
-    return thread.getMessages().some(msg => {
-      const receivedTime = msg.getDate().getTime();
-      return receivedTime >= bookingRequestDate.getTime() - SEARCH_WINDOW_MINUTES * 60 * 1000
-        && receivedTime <= bookingRequestDate.getTime() + SEARCH_WINDOW_MINUTES * 60 * 1000;
+    return rows.map(row => {
+      const obj = {};
+      headers.forEach((header, index) => {
+        let val = row[index];
+        
+        // Date 객체는 ISO 문자열로 변환 (프론트엔드 전송용)
+        if (val instanceof Date) {
+          // 유효한 날짜인지 확인
+          if (!isNaN(val.getTime())) {
+            val = val.toISOString();
+          } else {
+            val = '';
+          }
+        }
+        
+        obj[header] = val;
+      });
+      return obj;
     });
-  });
+  },
 
-  return threads;
-}
+  /**
+   * UUID 생성
+   */
+  getUuid() {
+    return Utilities.getUuid();
+  },
 
-// "November 18, 8:30 PM" 형태 포맷 함수
-function formatDateForGmailSubjectQuery(date) {
-  const monthNames = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
-  ];
+  /**
+   * 날짜 포맷팅 헬퍼
+   * @param {Date|string} value - Date 객체 또는 날짜 문자열
+   * @param {string} type - 'datetime' | 'date' | 'time'
+   * @returns {string} 포맷팅된 문자열
+   */
+  formatDate(value, type = 'datetime') {
+    if (!value) return '';
+    
+    try {
+      // 이미 HH:mm 형식의 문자열인 경우 그대로 반환
+      if (typeof value === 'string' && type === 'time' && value.includes(':') && !value.includes('T')) {
+        return value;
+      }
 
-  const year = date.getFullYear();
-  const month = monthNames[date.getMonth()];
-  const day = date.getDate();
+      const date = new Date(value);
+      if (isNaN(date.getTime())) return typeof value === 'string' ? value : '';
 
-  let hours = date.getHours();
-  const minutes = (date.getMinutes() + '').padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12 || 12;
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      const hh = String(date.getHours()).padStart(2, '0');
+      const mm = String(date.getMinutes()).padStart(2, '0');
+      const ss = String(date.getSeconds()).padStart(2, '0');
 
-  return `${month} ${day}, ${year} at ${hours}:${minutes} ${ampm}`;
-}
-
-function formatDateForGmailBodyQuery(date) {
-  const monthNames = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
-  ];
-
-  const month = monthNames[date.getMonth()];
-  const day = date.getDate();
-
-  let hours = date.getHours();
-  const minutes = (date.getMinutes() + '').padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12 || 12;
-
-  return `${month} ${day}, ${hours}:${minutes} ${ampm}`;
-}
-
-function formatDateForGmailReceivedQuery(date) {
-  const yyyy = date.getFullYear();
-  const mm = ('0' + (date.getMonth() + 1)).slice(-2);
-  const dd = ('0' + date.getDate()).slice(-2);
-  return `${yyyy}/${mm}/${dd}`;
-}
-
-function removeColumns(data, columnsToRemove) {
-  if (!data || data.length === 0) return [];
-
-  const headers = data[0];
-  const indicesToRemove = headers
-    .map((h, i) => columnsToRemove.includes(h) ? i : -1)
-    .filter(i => i !== -1);
-
-  if (indicesToRemove.length === 0) return data;
-
-  return data.map(row => row.filter((_, index) => !indicesToRemove.includes(index)));
-}
-
-function getBranchInfo(branchName, lang = 'en') {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAMES.BRANCH);
-  if (!sheet) {
-    throw new Error(`'${SHEET_NAMES.BRANCH}' 시트를 찾을 수 없습니다.`);
-  }
-
-  if (sheet.getLastRow() === 0) {
-    return []; // 빈 시트
-  }
-
-  const range = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn());
-  let values = range.getValues();
-  values.shift(); // 1행(헤더) 제거
-
-  const branchIdColIdx = 0; // 'id' (A열)
-  const calendarIdColIdx = 5;
-  const branchNameEnColIdx = 1; // 'branch_name_en' (B열)
-  const branchNameKoColIdx = 2; // 'branch_name_ko' (C열)
-  const branchNameColIdx = lang === 'en' ? branchNameEnColIdx : branchNameKoColIdx;
-
-  let branchId = null;
-  let calendarId = null;
-  let branchNameKo = null;
-
-  for (const row of values) {
-    if (row[branchNameColIdx] === branchName) {
-      branchId = row[branchIdColIdx];
-      calendarId = row[calendarIdColIdx];
-      branchNameKo = row[branchNameKoColIdx];
-      break;
+      if (type === 'date') return `${y}-${m}-${d}`;
+      if (type === 'time') return `${hh}:${mm}`;
+      
+      // default: datetime
+      return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+    } catch (e) {
+      Logger.log(`[Util] Date Parsing Error: ${e.message}`);
+      return String(value);
     }
+  },
+
+  /**
+   * 객체 데이터를 시트 행(Row) 배열로 변환
+   * (데이터 추가/수정 시 사용)
+   * * @param {Object} obj - 저장할 데이터 객체
+   * @param {Array<string>} headers - 시트 헤더 배열
+   * @returns {Array} 시트에 저장할 1차원 배열
+   */
+  convertObjectToRow(obj, headers) {
+    return headers.map(header => {
+      let val = obj[header];
+      if (val === undefined || val === null) return "";
+      
+      // ISO String 날짜를 다시 Date 객체로 변환하여 시트에 저장 (선택 사항)
+      // Apps Script는 Date 객체를 넣으면 시트 서식에 맞게 잘 들어감
+      if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val)) {
+        const d = new Date(val);
+        if (!isNaN(d.getTime())) return d;
+      }
+      
+      return val;
+    });
+  },
+
+  verifyGoogleIdToken(idToken) {
+    const res = UrlFetchApp.fetch(
+      'https://oauth2.googleapis.com/tokeninfo?id_token=' + idToken
+    );
+    return JSON.parse(res.getContentText());
   }
-
-  let branchInfo = null;
-  if (branchId && calendarId && branchNameKo && branchName) {
-    branchInfo = {
-      branchId: branchId,
-      calendarId: calendarId,
-      branchNameKo: branchNameKo,
-      branchNameEn: branchName,
-    }
-  }
-
-  return branchInfo;
-}
-
-function toQueryString(obj) {
-  return Object.keys(obj)
-    .filter(k => obj[k] !== null && obj[k] !== undefined)
-    .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(obj[k]))
-    .join('&');
-}
-
-function extractQueryParam(url, key) {
-  if (!url) return null;
-  const regex = new RegExp('[?&]' + key + '=([^&#]*)');
-  const match = url.match(regex);
-  return match ? decodeURIComponent(match[1]) : null;
-}
+};

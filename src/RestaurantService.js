@@ -1,593 +1,404 @@
-class ReservationService {
-  constructor() {
-    this.ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    this.resSheet = this.ss.getSheetByName(SHEET_NAMES.RESERVATION);
-    this.permSheet = this.ss.getSheetByName(SHEET_NAMES.USER_PERMISSION);
-    this.branchSheet = this.ss.getSheetByName(SHEET_NAMES.BRANCH);
+/**
+ * [ReservationService] 예약 정보 관리 및 비즈니스 로직 (Singleton)
+ */
+const ReservationService = {
+  // ============================================================
+  // 1. SCHEMA DEFINITION (컬럼명 및 타입 하드코딩)
+  // ============================================================
+  SCHEMA: {
+    // 기본 정보
+    'id': { type: 'string' },
+    'response_id': { type: 'string' },
+    'booking_request_date': { type: 'date' },
+    'branch_id': { type: 'string' },
+    'reservation_date': { type: 'date' },
+    'customer_name': { type: 'string' },
+    'pax': { type: 'number' },
+    'notes': { type: 'string' },
+    'phone_number': { type: 'string' },
+    'email': { type: 'string' },
+    'email_thread_id': { type: 'string' },
+    
+    // 연동 정보
+    'calendar_id': { type: 'string' },
+    'event_id': { type: 'string' },
+    
+    // 상태 정보
+    'enabled': { type: 'boolean' },
+    'is_read': { type: 'boolean' },
+    'message_sent_at': { type: 'date' },
+    
+    // 관리자 및 예약금 정보 (v1.4)
+    'internal_notes': { type: 'string' },
+    'deposit_status': { type: 'string' },
+    'deposit_amount': { type: 'number' },
+    'deposit_paid_at': { type: 'date' },
+    'deposit_refund_at': { type: 'date' },
+    
+    // 메타 정보
+    'created_at': { type: 'date' },
+    'updated_at': { type: 'date' }
+  },
 
-    this.slotMasterSheet = this.ss.getSheetByName(SHEET_NAMES.SLOT_MASTER);
-    this.slotDefaultSheet = this.ss.getSheetByName(SHEET_NAMES.SLOT_DEFAULT);
-    this.slotOverrideSheet = this.ss.getSheetByName(SHEET_NAMES.SLOT_OVERRIDE);
+  DEPOSIT_STATUS: {
+    NA: 'n/a',
+    PENDING: 'pending',
+    CONFIRM: 'confirm',
+    REFUND: 'refund',
+  },
 
-    this.calService = new CalendarService();
-    this.slotService = new SlotService();
-    this.branchService = new BranchService();
-
-    this.headers = this.resSheet.getRange(1, 1, 1, this.resSheet.getLastColumn()).getValues()[0];
-  }
-
-  getReservation(id) {
-    const rows = this.resSheet.getDataRange().getValues();
-    for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === id) {
-        const row = rows[i];
-        const obj = {};
-
-        // row → columnName: value 형태로 객체 변환
-        this.headers.forEach((header, idx) => {
-          obj[header] = row[idx];
-        });
-
-        return { row, obj };
-      }
-    }
-
-    return null;
-  }
+  // ============================================================
+  // 2. READ METHODS
+  // ============================================================
 
   /**
-   * [Read] 예약 목록 조회 (Web App용)
+   * [Read] 예약 목록 전체 조회
    */
-  getReservations(startDate, endDate, searchMode, userInfo) {
+  getAllReservations(userInfo) {
     try {
-      if (!this.resSheet) {
-        Logger.log(`[Error] 'reservation' 시트를 찾을 수 없습니다. 시트 이름을 확인하세요.`);
-        return []; // null 대신 빈 배열 리턴
+      const reservations = Util.getSheetDataAsObjects(Config.SHEET_NAMES.RESERVATION);
+      
+      if (!userInfo) return [];
+
+      if (userInfo.role === Config.USER_ROLES.ADMIN) {
+        return reservations;
+      } else {
+        const allowed = userInfo.allowedBranchIds || [];
+        return reservations.filter(r => allowed.includes(r.branch_id));
+      }
+    } catch (e) {
+      Logger.log(`[ReservationService] getAll Error: ${e.message}`);
+      throw e;
+    }
+  },
+
+  /**
+   * [Read] 단일 예약 조회
+   */
+  getReservationById(id) {
+    const reservations = Util.getSheetDataAsObjects(Config.SHEET_NAMES.RESERVATION);
+    return reservations.find(r => r.id === id);
+  },
+
+  // ============================================================
+  // 3. UPDATE METHODS
+  // ============================================================
+
+  /**
+   * [Update] 예약 읽음 처리 (is_read 단독 업데이트)
+   */
+  markAsRead(id) {
+    return this.updateCell(id, 'is_read', true);
+  },
+
+  /**
+   * [Update] 예약 정보 수정 (Safe Partial Update)
+   * - 스키마 기반 데이터 검증 및 타입 변환 적용
+   */
+  updateReservation(id, data) {
+    try {
+      if (!id) return Util.createResponse(false, null, 'Reservation ID is required');
+
+      const sheet = Util.getSpreadsheet().getSheetByName(Config.SHEET_NAMES.RESERVATION);
+      const allData = sheet.getDataRange().getValues();
+      const headers = allData[0];
+      const idIdx = headers.indexOf('id');
+
+      if (idIdx === -1) throw new Error('ID Column not found');
+
+      // 1. 대상 행 찾기
+      let targetRowIndex = -1;
+      let currentRow = [];
+      for (let i = 1; i < allData.length; i++) {
+        if (allData[i][idIdx] === id) {
+          targetRowIndex = i + 1; // 1-based index
+          currentRow = allData[i];
+          break;
+        }
       }
 
-      const data = this.resSheet.getDataRange().getValues();
-      if (data.length <= 1) {
-        Logger.log(`[Info] 예약 데이터가 없습니다.`);
-        return []; // null 대신 빈 배열 리턴
+      if (targetRowIndex === -1) return Util.createResponse(false, null, 'Reservation not found');
+
+      // 2. 가상 필드 처리 (visit_date + visit_time -> reservation_date)
+      if (data.visit_date && data.visit_time) {
+        const [y, m, d] = data.visit_date.split('-').map(Number);
+        const [hh, mm] = data.visit_time.split(':').map(Number);
+        // 입력 객체에 reservation_date를 직접 주입 (스키마 로직 활용을 위해)
+        data['reservation_date'] = new Date(y, m - 1, d, hh, mm);
       }
 
-      const rows = data.slice(1); // 헤더 제외
+      // 3. 스키마 기반 데이터 매핑 및 변경 감지
+      let isChanged = false;
+      const changes = {}; 
+      const updatedRow = [...currentRow];
 
-      // 1. 날짜 필터링
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+      // 입력 데이터의 모든 키 순회
+      Object.keys(data).forEach(inputKey => {
+        // [Changed] 별칭 매핑 로직 제거 (Input Key가 곧 DB Key)
+        const dbKey = inputKey;
 
-      const startTime = start.getTime();
-      const endTime = end.getTime();
+        // 스키마에 정의된 컬럼인지 확인
+        const schemaDef = this.SCHEMA[dbKey];
+        if (!schemaDef) return; // 스키마에 없는 키는 무시 (안전)
 
-      // 방문일(visit_date)은 E열 (Index 4)
-      // 요청일(request_date)은 C열 (Index 2)
-      const targetColIndex = (searchMode === 'request') ? 2 : 4;
+        // 시트 헤더 인덱스 확인
+        const colIdx = headers.indexOf(dbKey);
+        if (colIdx === -1) return;
 
-      let filteredRows = rows.filter(row => {
-        const visitDateVal = row[targetColIndex]; // E열: reservation_date (인덱스 4)
-        if (!visitDateVal) return false;
-        const rowTime = new Date(visitDateVal).getTime();
-        return rowTime >= startTime && rowTime <= endTime;
+        // 값 추출 및 undefined 체크
+        const rawValue = data[inputKey];
+        if (rawValue === undefined) return; // 값이 없으면 건너뜀 (기존 값 유지)
+
+        // 타입 변환
+        let safeValue = rawValue;
+        if (schemaDef.type === 'number') {
+          safeValue = Number(rawValue);
+          if (isNaN(safeValue)) return; // 숫자가 아니면 스킵
+        } else if (schemaDef.type === 'boolean') {
+          safeValue = String(rawValue) === 'true' || rawValue === true;
+        } else if (schemaDef.type === 'date') {
+          if (!(rawValue instanceof Date)) safeValue = new Date(rawValue);
+          if (isNaN(safeValue.getTime())) return; // 유효하지 않은 날짜 스킵
+        }
+
+        // 값 변경 비교
+        const currentVal = currentRow[colIdx];
+        let isDiff = false;
+        
+        if (schemaDef.type === 'date') {
+          // 날짜 비교
+          const t1 = currentVal instanceof Date ? currentVal.getTime() : 0;
+          const t2 = safeValue.getTime();
+          if (Math.abs(t1 - t2) > 1000) isDiff = true; // 1초 이상 차이 시 변경으로 간주
+        } else {
+          // 일반 비교
+          if (currentVal != safeValue) isDiff = true;
+        }
+
+        if (isDiff) {
+          updatedRow[colIdx] = safeValue;
+          isChanged = true;
+          changes[dbKey] = true;
+        }
       });
 
-      if (!userInfo) {
-        Logger.log('getReservations: userInfo 누락됨');
-        return [];
+      if (!isChanged) {
+        return Util.createResponse(true, null, 'No changes detected');
       }
 
-      // 2. 권한 필터링 (Manager)
-      if (userInfo.role !== 'admin') {
-        if (!this.permSheet) {
-          Logger.log(`[Error] 권한 시트(user_branch_permission)가 없습니다.`);
-          return [];
-        }
+      // 4. 메타데이터 업데이트
+      const updatedAtIdx = headers.indexOf('updated_at');
+      if (updatedAtIdx > -1) updatedRow[updatedAtIdx] = new Date();
 
-        const permData = this.permSheet.getDataRange().getValues();
-        const allowedBranchIds = permData
-          .filter(p => p[1] === userInfo.id && p[3] === true)
-          .map(p => p[2]);
+      // 5. 저장
+      sheet.getRange(targetRowIndex, 1, 1, updatedRow.length).setValues([updatedRow]);
 
-        filteredRows = filteredRows.filter(row => allowedBranchIds.includes(row[3])); // D열: branch_id (인덱스 3)
+      // 6. 동기화 로직 (주요 필드 변경 시)
+      if (changes.branch_id || changes.reservation_date || changes.enabled || changes.pax || changes.customer_name) {
+        this.syncCalendarAndSlot(currentRow, updatedRow, headers, changes);
       }
 
-      // 3. 데이터 매핑
-      return filteredRows.map((row, index) => ({
-        id: row[0],
-        branch_id: row[3],
-        customer_name: row[5],
-        visit_date: formatDate(row[4], 'date'),
-        visit_time: formatDate(row[4], 'time'),
-        pax: row[6],
-        email: row[8],
-        notes: row[7],
-        status: Boolean(row[12]),
-        request_date: formatDate(row[2], 'datetime'),
-        message_sent_at: row[14] ? formatDate(row[14], 'datetime') : '',
-        is_read: Boolean(row[13]),
-
-        // UI에서 필요한 추가 정보
-        row: index + 2,
-        kakaoData: this.getKakaoMessageData(row[0]),
-      }));
+      return Util.createResponse(true);
 
     } catch (e) {
-      Logger.log(`[Critical Error] getReservations 실패: ${e.message}`);
-      return [];
+      Logger.log(`[ReservationService] Update Error: ${e.message}`);
+      return Util.createResponse(false, null, e.message);
     }
-  }
-
-  getKakaoMessageData(id) {
-    try {
-      const reservation = this.getReservation(id);
-      if (!reservation) { // 1행은 보통 헤더이므로 1 이하는 거부
-        throw new Error(`예약정보(${id})를 찾을 수 없습니다.`);
-      }
-
-      const branchId = reservation.obj.branch_id;
-      const branchInfo = this.branchService.getBranch(branchId);
-      if (!branchInfo) {
-        throw new Error(`지점정보(${branchId})를 찾을 수 없습니다.`);
-      }
-      const branchNameKo = branchInfo.obj.branch_name_ko;
-
-      const isEnabled = Boolean(reservation.obj.enabled);
-      const messageSentAt = reservation.obj.message_sent_at || '';
-
-      const titleBranchName = branchNameKo.replace('왕비집', '').trim();
-
-      let title;
-      if (!isEnabled) {
-        title = `🔴 [취소] ${titleBranchName} 예약알림`;
-      } else if (messageSentAt) {
-        title = `🟡 [변경] ${titleBranchName} 예약알림`;
-      } else {
-        title = `🟢 [신규] ${titleBranchName} 예약알림`;
-      }
-
-      let body = '';
-      body += `- 방문일: ${Utilities.formatDate(reservation.obj.reservation_date, "Asia/Seoul", "MM/dd HH:mm")}\n`;
-      body += `- 이름: ${reservation.obj.name}\n`;
-      body += `- 인원: ${reservation.obj.number_of_people}\n`;
-      body += reservation.obj.notes ? `- 노트: ${reservation.obj.notes}\n` : '';
-      body += `- 이메일: ${reservation.obj.email_address}\n`;
-      body += `\n- 예약ID: ${reservation.obj.id}\n`;
-
-      const calendarId = reservation.obj.calendar_id;
-      const eventId = reservation.obj.event_id;
-      let link = '';
-      if (!calendarId || !eventId) {
-        // throw new Error(`calendarId, eventId 조회 실패`);
-        Logger.log(`[getMessageData] calendarId, eventId 조회 실패`);
-      } else {
-        const eventIdPrefix = eventId.split('@')[0];
-        const cid = Utilities.base64EncodeWebSafe(calendarId).replace(/=+$/, '');
-        const combinedIdForEid = eventIdPrefix + " " + calendarId;
-        const eid = Utilities.base64EncodeWebSafe(combinedIdForEid).replace(/=+$/, '');
-        link = `https://calendar.google.com/calendar/u/0/r/month?cid=${cid}&eid=${eid}`;
-      }
-
-      // HTML로 전송할 데이터를 객체로 만듭니다.
-      return {
-        title: title,
-        body: body,
-        link: link,
-      };
-    } catch (e) {
-      // 오류가 발생하면 HTML에 오류 메시지를 전송합니다.
-      Logger.log('데이터 조회 오류: ' + e.message);
-      throw new Error('데이터 조회 중 오류: ' + e.message);
-    }
-  }
-
-  markAsRead(id) {
-    const data = this.resSheet.getDataRange().getValues();
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === id) { // UUID 일치
-        const rowIndex = i + 1;
-        // N열 (14번째 열) -> is_read = true
-        this.resSheet.getRange(rowIndex, 14).setValue(true);
-        return { success: true };
-      }
-    }
-    return { success: false };
-  }
+  },
 
   /**
-   * [Update Status] 예약 상태 변경
-   * @param {string} id - UUID
-   * @param {boolean} isEnabled - true(예약) / false(취소)
+   * [Update] 상태만 빠르게 변경
    */
-  updateStatus(id, isEnabled) {
-    const boolStatus = (String(isEnabled) === 'true');
-
-    const data = this.resSheet.getDataRange().getValues();
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === id) {
-        const rowIndex = i + 1;
-        const rowData = data[i];
-
-        // DB 업데이트
-        this.resSheet.getRange(rowIndex, 13).setValue(boolStatus); // enabled
-        this.resSheet.getRange(rowIndex, 17).setValue(new Date()); // updated_at
-
-        // 캘린더 및 슬롯 처리
-        const branchId = rowData[3];
-        const reservationDate = new Date(rowData[4]); // Date Object
-        const targetCalendarId = rowData[10];
-        const eventId = rowData[11];
-
-        if (boolStatus === false) {
-          // [취소] -> Target 이벤트 삭제
-          this.deleteTargetEvent(targetCalendarId, eventId);
-
-          // [취소] -> 슬롯이 비었는지 확인하고 Source 이벤트 정리 (슬롯 OPEN 시도)
-          this.syncSourceSlot(branchId, reservationDate);
-        } else {
-        }
-
-        return { success: true, status: boolStatus };
+  updateReservationStatus(id, newStatus) {
+    try {
+      if (typeof newStatus !== 'boolean') {
+        throw new Error(`newStatus (${newStatus}) is invalid (must be Boolean)`);
       }
+
+      // update Google Sheet
+      const reservationUpdate = this.updateReservation(id, { enabled: newStatus });
+      if (!reservationUpdate.success) {
+        throw new Error('Fail to update sheet');
+      }
+
+      if (newStatus === false) {
+        // update Gmail Label
+        const reservation = this.getReservationById(id);
+        const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.CANCEL);
+        if (!labelUpdate) {
+          Logger.log(`[ReservationService] updateMessageSentAt Warn: Reservation Label 업데이트 실패`);
+        }
+      }
+
+      return Util.createResponse(true);
+    } catch (e) {
+      Logger.log(`[ReservationService] updateReservationStatus Error: ${e.message}`);
+      return Util.createResponse(false, null, e.message);
     }
-    return { success: false, error: '예약을 찾을 수 없습니다.' };
-  }
+  },
+
+  /**
+   * [Update] 상태만 빠르게 변경
+   */
+  updateDepositStatus(id, newStatus) {
+    try {
+      const statusNames = Object.values(this.DEPOSIT_STATUS);
+      if (!statusNames.includes(newStatus)) {
+        throw new Error(`newStatus (${newStatus}) is invalid (must be one of ${"'" + implode("', '", statusNames) + "'"})`);
+      }
+
+      // update Google Sheet
+      const reservationUpdate = this.updateReservation(id, { deposit_status : newStatus });
+      if (!reservationUpdate.success) {
+        throw new Error('Fail to update sheet');
+      }
+
+      const reservation = this.getReservationById(id);
+      if (newStatus === this.DEPOSIT_STATUS.NA) {
+        // update Gmail Label
+        const labelUpdate = GmailService.deleteDepositLabel(reservation.email_thread_id);
+        if (!labelUpdate) {
+          Logger.log(`[ReservationService] updateMessageSentAt Warn: Deposit Label 삭제 실패`);
+        }
+      } else if (newStatus === this.DEPOSIT_STATUS.PENDING) {
+        const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.PENDING);
+        if (!labelUpdate) {
+          Logger.log(`[ReservationService] updateMessageSentAt Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.PENDING})`);
+        }
+      } else if (newStatus === this.DEPOSIT_STATUS.CONFIRM) {
+        const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.CONFIRM);
+        if (!labelUpdate) {
+          Logger.log(`[ReservationService] updateMessageSentAt Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.CONFIRM})`);
+        }
+      } else if (newStatus === this.DEPOSIT_STATUS.REFUND) {
+        const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.REFUND);
+        if (!labelUpdate) {
+          Logger.log(`[ReservationService] updateMessageSentAt Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.REFUND})`);
+        }
+      }
+
+      return Util.createResponse(true);
+    } catch (e) {
+      Logger.log(`[ReservationService] updateReservationStatus Error: ${e.message}`);
+      return Util.createResponse(false, null, e.message);
+    }
+  },
 
   updateMessageSentAt(id) {
-    const data = this.resSheet.getDataRange().getValues();
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === id) {
-        const rowIndex = i + 1;
-
-        // DB 업데이트
-        this.resSheet.getRange(rowIndex, 15).setValue(new Date()); // message_sent_at
-
-        return { success: true };
-      }
-    }
-    return { success: false, error: '예약을 찾을 수 없습니다.' };
-  }
-
-  /**
-   * [Update] 예약 정보 수정
-   */
-  updateReservation(data) {
-    const rows = this.resSheet.getDataRange().getValues();
-    for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === data.id) { // UUID 일치
-        const rowIndex = i + 1;
-        const currentRow = rows[i];
-
-        const rawDbBookingRequestDate = new Date(currentRow[2]);
-        const dbBookingRequestDate = new Date(rawDbBookingRequestDate);
-        dbBookingRequestDate.setSeconds(0);
-        dbBookingRequestDate.setMilliseconds(0);
-        const dbBranchId = currentRow[3];      // D열
-        const rawDbReservationDate = new Date(currentRow[4]);
-        const dbReservationDate = new Date(rawDbReservationDate);
-        dbReservationDate.setSeconds(0);
-        dbReservationDate.setMilliseconds(0);
-        const dbName = currentRow[5];          // F열
-        const dbPax = Number(currentRow[6]);   // G열
-        const dbNotes = currentRow[7];         // H열
-        const dbEmail = currentRow[8];         // I열
-        const dbEmailThreadId = currentRow[9]; // J열
-        const dbCalendarId = currentRow[10];   // K열
-        const dbEventId = currentRow[11];      // L열
-        const dbStatus = Boolean(currentRow[12]); // M열 (Enabled)
-
-        let newReservationDate = new Date(dbReservationDate);
-        if (data.visit_date && data.visit_time) {
-          const datePart = new Date(data.visit_date);
-          const [hh, mm] = data.visit_time.split(':').map(Number);
-          datePart.setHours(hh, mm, 0, 0);
-          newReservationDate = datePart;
-        }
-
-        const newStatus = (String(data.status) === 'true');
-
-        let isChanged = false;
-        const changes = {};
-
-        // 지점 변경 여부
-        if (dbBranchId !== data.branch_id) {
-          changes.branch = true;
-          isChanged = true;
-          this.resSheet.getRange(rowIndex, 4).setValue(data.branch_id);
-        }
-
-        // 시간 변경 여부
-        if (dbReservationDate.getTime() !== newReservationDate.getTime()) {
-          changes.time = true;
-          isChanged = true;
-          this.resSheet.getRange(rowIndex, 5).setValue(newReservationDate);
-        }
-
-        // 이름 변경
-        if (dbName !== data.customer_name) {
-          isChanged = true;
-          this.resSheet.getRange(rowIndex, 6).setValue(data.customer_name);
-        }
-
-        // 인원 변경 (숫자 비교)
-        if (dbPax !== Number(data.pax)) {
-          isChanged = true;
-          changes.content = true; // 내용 변경 (캘린더 업데이트용)
-          this.resSheet.getRange(rowIndex, 7).setValue(data.pax);
-        }
-
-        // 비고 변경
-        if (dbNotes !== data.notes) {
-          isChanged = true;
-          changes.content = true;
-          this.resSheet.getRange(rowIndex, 8).setValue(data.notes);
-        }
-
-        // 이메일 변경
-        if (dbEmail !== data.email) {
-          isChanged = true;
-          changes.content = true;
-          this.resSheet.getRange(rowIndex, 9).setValue(data.email);
-        }
-
-        // 상태 변경
-        if (dbStatus !== newStatus) {
-          isChanged = true;
-          // 상태 변경은 캘린더 취소/생성 로직과 연결될 수 있으나, 
-          // 여기서는 값만 업데이트하고 아래 캘린더 로직에서 처리
-          this.resSheet.getRange(rowIndex, 13).setValue(newStatus);
-
-          if (newStatus) {
-            new GmailService().setConfirmLabel(dbEmailThreadId);
-          } else {
-            new GmailService().setCancelLabel(dbEmailThreadId);
-          }
-        }
-
-        if (!isChanged) {
-          Logger.log(`[Update] 변경 사항 없음. ID: ${data.id}`);
-          return { success: true, message: 'No changes detected' };
-        }
-
-        this.resSheet.getRange(rowIndex, 17).setValue(new Date());
-
-        if (dbStatus === true && newStatus === false) {
-          this.deleteTargetEvent(dbCalendarId, dbEventId);
-          this.syncSourceSlot(dbBranchId, dbReservationDate); // 기존 시간 슬롯 오픈
-        }
-
-        if (newStatus === true) {
-          const title = this.getTargetEventTitle(data.customer_name, data.pax);
-
-          const branchNameKo = this.getBranchNameById(dbBranchId, 'ko')
-          const desc = this.getTargetEventDescription(
-            data.customer_name,
-            data.pax,
-            data.notes,
-            data.email,
-            branchNameKo,
-            newReservationDate,
-            dbBookingRequestDate
-          );
-
-          if (newStatus === true) {
-            // [Case A] 지점 변경 (이동)
-            if (changes.branch) {
-              // 기존 삭제
-              this.calService.deleteEvent(dbCalendarId, dbEventId);
-              this.syncSourceSlot(dbBranchId, dbReservationDate);
-
-              // 신규 생성
-              const newTargetCalId = this.getCalendarIdByBranchId(data.branch_id);
-              const newEventId = this.calService.createEvent(newTargetCalId, title, newReservationDate, desc);
-
-              // DB ID 업데이트
-              if (newTargetCalId && newEventId) {
-                this.resSheet.getRange(rowIndex, 11).setValue(newTargetCalId);
-                this.resSheet.getRange(rowIndex, 12).setValue(newEventId);
-              }
-
-              this.syncSourceSlot(data.branch_id, newReservationDate); // 신규 지점/시간 슬롯 체크
-            }
-
-            // [Case B] 시간만 변경 (이동) - 지점은 그대로
-            else if (changes.time) {
-              // 시간 변경: 기존 수정
-              this.calService.updateEvent(dbCalendarId, dbEventId, title, newReservationDate, desc);
-
-              // 슬롯 체크: 구 시간 & 신 시간 모두
-              this.syncSourceSlot(dbBranchId, dbReservationDate); // 구 시간
-              this.syncSourceSlot(dbBranchId, newReservationDate); // 신 시간
-            }
-
-            // [Case C] 단순 내용 변경 (이름, 인원 등)
-            else if (changes.content) {
-              // 내용 변경: 기존 수정
-              this.calService.updateEvent(dbCalendarId, dbEventId, title, newReservationDate, desc);
-            }
-          }
-        }
-        
-        return { success: true };
-      }
-    }
-    return { success: false, error: '해당 예약을 찾을 수 없습니다.' };
-  }
-
-  updateReservationStatus(id, newStatus) {
-    newStatus = (String(newStatus) === 'true');
-    const rows = this.resSheet.getDataRange().getValues();
-    for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === id) { // UUID 일치
-        const rowIndex = i + 1;
-        const currentRow = rows[i];
-
-        const rawDbBookingRequestDate = new Date(currentRow[2]);
-        const dbBookingRequestDate = new Date(rawDbBookingRequestDate);
-        dbBookingRequestDate.setSeconds(0);
-        dbBookingRequestDate.setMilliseconds(0);
-
-        const dbBranchId = currentRow[3];      // D열
-
-        const rawDbReservationDate = new Date(currentRow[4]);
-        const dbReservationDate = new Date(rawDbReservationDate);
-        dbReservationDate.setSeconds(0);
-        dbReservationDate.setMilliseconds(0);
-
-        const dbName = currentRow[5];          // F열
-        const dbPax = Number(currentRow[6]);   // G열
-        const dbNotes = currentRow[7];         // H열
-        const dbEmail = currentRow[8];         // I열
-        const dbEmailThreadId = currentRow[9]; // J열
-        const dbCalendarId = currentRow[10];   // K열
-        const dbEventId = currentRow[11];      // L열
-
-        this.resSheet.getRange(rowIndex, 13).setValue(newStatus);
-        this.resSheet.getRange(rowIndex, 17).setValue(new Date());
-
-        if (newStatus === false) {
-          this.deleteTargetEvent(dbCalendarId, dbEventId);
-          this.syncSourceSlot(dbBranchId, dbReservationDate); // 기존 시간 슬롯 오픈
-        } else {
-          const title = this.getTargetEventTitle(dbName, dbPax);
-
-          const branchNameKo = this.getBranchNameById(dbBranchId, 'ko')
-          const desc = this.getTargetEventDescription(
-            dbName,
-            dbPax,
-            dbNotes,
-            dbEmail,
-            branchNameKo,
-            dbReservationDate,
-            dbBookingRequestDate
-          );
-
-          // 기존 삭제
-          if (dbCalendarId && dbEventId) {
-            this.calService.deleteEvent(dbCalendarId, dbEventId);
-          }
-
-          // 신규 생성
-          const newTargetCalId = this.getCalendarIdByBranchId(dbBranchId);
-          const newEventId = this.calService.createEvent(newTargetCalId, title, dbReservationDate, desc);
-
-          // DB ID 업데이트
-          if (newTargetCalId && newEventId) {
-            this.resSheet.getRange(rowIndex, 11).setValue(newTargetCalId);
-            this.resSheet.getRange(rowIndex, 12).setValue(newEventId);
-          }
-
-          this.syncSourceSlot(dbBranchId, dbReservationDate); // 신규 지점/시간 슬롯 체크
-        }
-
-        if (newStatus === true) {
-          new GmailService().setConfirmLabel(dbEmailThreadId);
-        } else {
-          new GmailService().setCancelLabel(dbEmailThreadId);
-        }
-
-        return { success: true };
-      }
-    }
-  }
-
-  getTargetEventTitle(customerName, pax) {
-    return `${customerName} (${pax})`;
-  }
-
-  getTargetEventDescription(
-    customerName,
-    pax,
-    customerNotes,
-    customerEmailAddress,
-    branchNameKo,
-    reservationDate,
-    bookingRequestDate
-  ) {
-    let newDescription = '';
-    newDescription += `이름: ${customerName}\n`;
-    newDescription += `인원: ${pax}\n`;
-    newDescription += `노트: ${customerNotes}\n`;
-    newDescription += `이메일: ${customerEmailAddress}\n`;
-    newDescription += `지점: ${branchNameKo}\n`;
-    newDescription += `방문일: ${Utilities.formatDate(reservationDate, "Asia/Seoul", "MM/dd HH:mm")}\n`;
-    newDescription += `예약요청일: ${Utilities.formatDate(bookingRequestDate, "Asia/Seoul", "MM/dd")}\n`;
-
-    return newDescription;
-  }
-
-  syncSourceSlot(branchId, dateObj) {
     try {
-      // 1. 정보 조회
-      const branchNameEn = this.getBranchNameById(branchId, 'en');
-      const targetCalId = this.getCalendarIdByBranchId(branchId);
-
-      // 2. 슬롯 계산
-      const maxSlot = this.slotService.getMaxTimeSlot(branchId, dateObj);
-      const currentSlot = this.calService.getEventCount(targetCalId, dateObj);
-
-      Logger.log(`[SyncSource] ${branchNameEn} ${dateObj} | 현재: ${currentSlot} / 최대: ${maxSlot}`);
-
-      // 3. 정책 적용
-      if (maxSlot !== -1 && currentSlot < maxSlot) {
-        // [여유 있음] -> Source 캘린더에 "블로킹 이벤트"가 있다면 삭제해서 위젯을 열어야 함
-        Logger.log(`[SyncSource] 여유 있음 -> Source 이벤트 삭제 시도`);
-        this.calService.deleteSourceEventIfExists(branchNameEn, dateObj);
-      } else {
-        // [꽉 찼음] -> Source 캘린더 이벤트가 없다면 생성해서 블로킹 해야 함
-        Logger.log(`[SyncSource] 꽉 찼음 -> Source 이벤트 생성 시도`);
-        this.calService.addSourceEventIfNotExists(branchNameEn, dateObj);
+      // update Google Sheet
+      const reservationUpdate = this.updateReservation(id, { message_sent_at: new Date() });
+      if (!reservationUpdate.success) {
+        throw new Error('Fail to update sheet');
       }
+
+      // update Gmail Label
+      const reservation = this.getReservationById(id);
+      const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.CONFIRM);
+      if (!labelUpdate) {
+        Logger.log(`[ReservationService] updateMessageSentAt Warn: Reservation Label 업데이트 실패`);
+      }
+
+      return Util.createResponse(true);
     } catch (e) {
-      Logger.log(`[SyncSource] 오류: ${e.message}`);
+      Logger.log(`[ReservationService] updateMessageSentAt Error: ${e.message}`);
+      return Util.createResponse(false, null, e.message);
     }
-  }
-
-  createTargetEvent(calId, data, dateObj) {
-    const title = `${data.customer_name} (${data.pax}명)`;
-    const desc = `이름: ${data.customer_name}\n인원: ${data.pax}\n메모: ${data.notes}\n이메일: ${data.email}`;
-    return this.calService.createEvent(calId, title, dateObj, desc);
-  }
-
-  modifyTargetEvent(calId, eventId, data, dateObj) {
-    const title = `${data.customer_name} (${data.pax}명)`;
-    const desc = `이름: ${data.customer_name}\n인원: ${data.pax}\n메모: ${data.notes}\n이메일: ${data.email}`;
-    this.calService.updateEvent(calId, eventId, title, dateObj, desc);
-  }
-
-  deleteTargetEvent(calId, eventId) {
-    this.calService.deleteEvent(calId, eventId);
-  }
-
-  // --- Branch Info ---
-  getCalendarIdByBranchId(branchId) {
-    const data = this.branchSheet.getDataRange().getValues();
-    // ⚠️ [확인 필요] Branch 시트의 calendar_id 컬럼 인덱스 (예: 5번 F열)
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === branchId) return data[i][5];
-    }
-    return null;
-  }
-
-  getBranchNameById(branchId, lang = 'en') {
-    const data = this.branchSheet.getDataRange().getValues();
-    const colIdx = lang === 'en' ? 1 : 2
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === branchId) return data[i][colIdx];
-    }
-    return '';
-  }
+  },
 
   /**
-   * (Helper) 슬롯 가용성 체크
-   * @returns {boolean} 예약 가능 여부
+   * [Helper] 단일 셀 업데이트 (가볍게 처리)
    */
-  checkAvailability(branchId, calendarId, dateObj) {
-    const max = this.slotService.getMaxTimeSlot(branchId, dateObj);
-    const current = this.calService.getEventCount(calendarId, dateObj);
+  updateCell(id, colName, value) {
+    const sheet = Util.getSpreadsheet().getSheetByName(Config.SHEET_NAMES.RESERVATION);
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const idIdx = headers.indexOf('id');
+    const colIdx = headers.indexOf(colName);
 
-    if (max === -1) return false; // 설정 오류
-    return current < max;
+    if (idIdx === -1 || colIdx === -1) return Util.createResponse(false, null, 'Column not found');
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][idIdx] === id) {
+        sheet.getRange(i + 1, colIdx + 1).setValue(value);
+        return Util.createResponse(true);
+      }
+    }
+    return Util.createResponse(false, null, 'Not found');
+  },
+
+  /**
+   * [Logic] 캘린더 및 슬롯 동기화
+   */
+  syncCalendarAndSlot(oldRow, newRow, headers, changes) {
+    try {
+      const getVal = (row, key) => row[headers.indexOf(key)];
+
+      const oldBranchId = getVal(oldRow, 'branch_id');
+      const newBranchId = getVal(newRow, 'branch_id');
+      const oldDate = new Date(getVal(oldRow, 'reservation_date'));
+      const newDate = new Date(getVal(newRow, 'reservation_date'));
+      const isEnabled = getVal(newRow, 'enabled');
+      
+      const calendarId = getVal(newRow, 'calendar_id');
+      const eventId = getVal(newRow, 'event_id');
+
+      // 1. 취소됨
+      if (!isEnabled) {
+        if (eventId) CalendarService.deleteEvent(calendarId, eventId);
+        SlotService.syncSourceSlot(oldBranchId, oldDate);
+        return;
+      }
+
+      // 2. 지점/날짜 변경 (이동)
+      if (changes.branch_id || changes.reservation_date) {
+        if (eventId) CalendarService.deleteEvent(calendarId, eventId);
+        SlotService.syncSourceSlot(oldBranchId, oldDate); // 구 슬롯 해제
+
+        const targetCalId = BranchService.getCalendarId(newBranchId);
+        const title = `${getVal(newRow, 'customer_name')} (${getVal(newRow, 'pax')})`;
+        // [Changed] Use internal method _buildEventDesc
+        const desc = this._buildEventDesc(newRow, headers);
+        
+        const newEventId = CalendarService.createEvent(targetCalId, title, newDate, desc);
+        this.updateCell(getVal(newRow, 'id'), 'calendar_id', targetCalId);
+        this.updateCell(getVal(newRow, 'id'), 'event_id', newEventId);
+
+        SlotService.syncSourceSlot(newBranchId, newDate); // 신규 슬롯 반영
+      } 
+      // 3. 내용만 변경
+      else if (changes.customer_name || changes.pax || changes.notes || changes.internal_notes) {
+        const title = `${getVal(newRow, 'customer_name')} (${getVal(newRow, 'pax')})`;
+        // [Changed] Use internal method _buildEventDesc
+        const desc = this._buildEventDesc(newRow, headers);
+        CalendarService.updateEvent(calendarId, eventId, title, newDate, desc);
+      }
+
+    } catch (e) {
+      Logger.log(`[Sync] Fail: ${e.message}`);
+    }
+  },
+
+  updateEventIdsInSheet(id, calId, evtId) {
+    const sheet = Util.getSpreadsheet().getSheetByName(Config.SHEET_NAMES.RESERVATION);
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const idIdx = headers.indexOf('id');
+    const calIdx = headers.indexOf('calendar_id');
+    const evtIdx = headers.indexOf('event_id');
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][idIdx] === id) {
+        sheet.getRange(i + 1, calIdx + 1).setValue(calId);
+        sheet.getRange(i + 1, evtIdx + 1).setValue(evtId);
+        break;
+      }
+    }
+  },
+
+  // [Changed] Internal method convention
+  _buildEventDesc(row, headers) {
+      const _getVal = (key) => row[headers.indexOf(key)];
+      return `\n이름: ${_getVal('customer_name')}\n인원: ${_getVal('pax')}\n노트: ${_getVal('notes')}\n관리자메모: ${_getVal('internal_notes')}`;
   }
-}
+};
