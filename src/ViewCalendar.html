@@ -1,0 +1,42 @@
+<!-- ViewCalendar.html (캘린더 뷰) -->
+<div class="h-full flex flex-col space-y-4">
+  
+  <div class="bg-white p-4 rounded-xl shadow flex flex-col md:flex-row justify-between items-start md:items-center">
+    <h3 class="text-xl font-bold text-gray-700 mb-2 md:mb-0">예약 현황 캘린더</h3>
+    
+    <!-- 지점 선택 드롭다운 -->
+    <div class="flex items-center space-x-2">
+      <label for="calendar-branch-select" class="text-sm font-medium text-gray-600">지점 선택:</label>
+      <select 
+        id="calendar-branch-select"
+        v-model="selectedCalendarBranchId"
+        class="border border-gray-300 rounded-lg p-2 bg-white text-sm focus:ring-red-500 focus:border-red-500"
+      >
+        <option value="master">통합 캘린더 (마스터)</option>
+        <option 
+          v-for="branch in branches" 
+          :key="branch.id"
+          :value="branch.id"
+        >
+          {{ branch.branch_name_ko }}
+        </option>
+      </select>
+    </div>
+  </div>
+
+  <!-- 캘린더 iFrame 컨테이너 -->
+  <div class="flex-1 bg-white rounded-xl shadow overflow-hidden relative">
+    <div v-if="!activeCalendarId" class="absolute inset-0 flex items-center justify-center text-gray-500">
+      <i class="ph ph-calendar-x text-4xl mr-2"></i> 캘린더 ID를 찾을 수 없습니다.
+    </div>
+
+    <!-- Google Calendar iFrame -->
+    <iframe 
+      :src="calendarIframeSrc" 
+      class="w-full h-full border-none"
+      frameborder="0" 
+      scrolling="no"
+    ></iframe>
+  </div>
+
+</div>

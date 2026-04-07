@@ -1,0 +1,56 @@
+<!-- ModalAlert.html (Custom Alert / Confirm Modal) -->
+<!-- 이 모달은 index.html에 include 되어 있으며, v-if="alertModal.isOpen"으로 제어됩니다. -->
+<transition name="fade">
+  <div v-if="alertModal.isOpen"
+    class="fixed inset-0 z-[1000] flex items-center justify-center bg-black bg-opacity-60 p-4"
+    @click.self="handleAlertResult(false)">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all">
+
+      <!-- Header / Icon -->
+      <div :class="alertModal.isConfirm ? 'bg-amber-500' : 'bg-red-800'"
+        class="text-white p-4 flex items-center justify-between">
+        <h3 class="text-xl font-bold flex items-center">
+          <i v-if="alertModal.isConfirm" class="ph ph-warning-circle text-2xl mr-2"></i>
+          <i v-else class="ph ph-info text-2xl mr-2"></i>
+          {{ alertModal.title }}
+        </h3>
+      </div>
+
+      <!-- Body -->
+      <div class="p-6 text-gray-700">
+        <p class="text-base leading-relaxed whitespace-pre-line">{{ alertModal.message }}</p>
+      </div>
+
+      <!-- Footer / Actions -->
+      <div class="p-4 bg-gray-50 flex justify-end space-x-3">
+
+        <!-- Confirm Actions -->
+        <template v-if="alertModal.isConfirm">
+          <button
+            @click="handleAlertResult(false)"
+            class="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition font-medium"
+          >
+            취소
+          </button>
+          <button
+            @click="handleAlertResult(true)"
+            class="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition font-medium"
+          >
+            확인
+          </button>
+        </template>
+
+        <!-- Alert Action -->
+        <template v-else>
+          <button
+            @click="handleAlertResult(true)"
+            class="px-4 py-2 bg-red-800 text-white rounded-lg hover:bg-red-900 transition font-medium"
+          >
+            닫기
+          </button>
+        </template>
+
+      </div>
+    </div>
+  </div>
+</transition>

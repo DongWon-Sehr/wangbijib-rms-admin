@@ -1,0 +1,96 @@
+<!-- ModalMailTemplate.html -->
+<!-- Editor / Preview Toggle (Simple Mode) + Loading Overlay -->
+
+<div 
+  class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col relative overflow-hidden" 
+  v-if="activeSystemData.type === 'mail' && localMailData"
+>
+
+  <!-- [NEW] Modal Loading Overlay (모달 전용 스피너) -->
+  <div 
+    v-if="isModalLoading" 
+    class="absolute inset-0 z-50 bg-white bg-opacity-75 flex flex-col items-center justify-center backdrop-blur-sm"
+  >
+    <div class="animate-spin rounded-full h-10 w-10 border-4 border-gray-200 border-t-red-800"></div>
+    <span class="mt-3 text-sm text-gray-600 font-medium">저장 중입니다...</span>
+  </div>
+
+  <!-- Header (Fixed) -->
+  <div class="p-6 border-b flex-shrink-0 flex justify-between items-center bg-white z-10">
+    <div class="flex flex-col">
+       <h2 class="text-2xl font-bold text-red-800">메일 템플릿 수정</h2>
+       <!-- Key 대신 ID 표시 -->
+       <span class="text-xs text-gray-500 font-mono mt-1">ID: {{ localMailData.id || 'New' }}</span>
+    </div>
+    <div class="flex items-center space-x-2">
+       <button 
+        type="button" 
+        @click="handleMailSave"
+        class="px-4 py-2 bg-red-800 text-white rounded-lg hover:bg-red-900 font-bold transition shadow-sm"
+       >
+         저장
+       </button>
+       <button @click="closeModal('mail')" class="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition">
+         <i class="ph ph-x text-2xl"></i>
+       </button>
+    </div>
+  </div>
+
+  <!-- Scrollable Content -->
+  <div class="p-6 flex-1 overflow-y-auto custom-scrollbar">
+    <form @submit.prevent="handleMailSave">
+      <div class="space-y-4">
+        
+        <!-- 템플릿 제목 수정 필드 -->
+        <div>
+           <label class="block text-sm font-medium text-gray-700 mb-1">템플릿 제목</label>
+           <input 
+             type="text" 
+             v-model="localMailData.template_name" 
+             class="w-full border rounded-lg p-3 focus:ring-red-500 focus:border-red-500 font-mono" 
+             placeholder="예: CONFIRMATION_MAIL" 
+             required
+           >
+        </div>
+
+        <!-- 예약어 버튼 (에디터 모드일 때만 표시) -->
+        <div v-show="!isPreviewMode">
+           <label class="block text-sm font-medium text-gray-700 mb-1">예약어 삽입</label>
+           <div class="flex flex-wrap gap-2 mb-2">
+              <button 
+                 v-for="kw in availableKeywords" 
+                 :key="kw"
+                 type="button"
+                 @mousedown.prevent="insertPlaceholder(kw)" 
+                 class="inline-flex items-center px-2.5 py-1 rounded text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 transition shadow-sm"
+              >
+                 {{ kw }}
+              </button>
+           </div>
+        </div>
+
+        <!-- Mode 1: Visual Editor (Summernote) -->
+        <div v-show="!isPreviewMode">
+           <div v-once>
+              <div id="mail-summernote"></div>
+           </div>
+        </div>
+
+        <!-- Mode 2: Preview (Result Badge) -->
+        <div v-if="isPreviewMode" class="border rounded-lg p-4 bg-gray-50 overflow-y-auto" style="height: 350px;">
+           <div class="mb-2 text-xs font-bold text-gray-400 uppercase tracking-wider">Preview Result</div>
+           <div v-html="renderPreview(localMailData.body_html)" class="prose max-w-none text-sm bg-white p-4 rounded shadow-sm border border-gray-100"></div>
+        </div>
+        
+        <!-- Toggle Preview Button -->
+        <div class="flex justify-end pt-2">
+           <button type="button" @click="togglePreview" class="text-sm text-gray-600 hover:text-gray-900 underline flex items-center">
+             <i :class="isPreviewMode ? 'ph-bold ph-pencil-simple' : 'ph-bold ph-eye'" class="mr-1"></i>
+             {{ isPreviewMode ? '에디터로 돌아가기 (수정)' : '미리보기' }}
+           </button>
+        </div>
+
+      </div>
+    </form>
+  </div>
+</div>

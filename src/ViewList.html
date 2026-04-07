@@ -1,0 +1,456 @@
+<!-- ViewList.html (예약 리스트 메인 뷰 - Final Version) -->
+<div class="h-full flex flex-col space-y-4 overflow-hidden">
+
+  <!-- 1. 메인 필터 및 검색 바 (데스크톱) -->
+  <div class="hidden md:block bg-white p-4 rounded-xl shadow border border-gray-100 flex-shrink-0">
+    <div class="flex flex-col xl:flex-row xl:space-x-4 space-y-3 xl:space-y-0">
+
+      <!-- 날짜 및 통합 검색 -->
+      <div class="flex-1 flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-3">
+        <!-- 날짜 선택 -->
+        <div class="flex items-center space-x-0 border border-gray-300 rounded-lg bg-white overflow-hidden">
+          <select v-model="filterDateType" class="bg-gray-50 text-xs font-bold text-gray-600 py-2 pl-2 pr-1 border-r border-gray-200 focus:outline-none cursor-pointer h-full">
+             <option value="reservation_date">방문일</option>
+             <option value="booking_request_date">예약요청일</option>
+          </select>
+          <div class="flex items-center space-x-1 px-2 py-2">
+            <input type="date" v-model="filterDateStart" class="bg-transparent text-sm focus:outline-none w-28 cursor-pointer font-medium text-gray-700">
+            <span class="text-gray-400 font-bold">~</span>
+            <input type="date" v-model="filterDateEnd" class="bg-transparent text-sm focus:outline-none w-28 cursor-pointer font-medium text-gray-700">
+          </div>
+        </div>
+
+        <!-- 통합 검색 입력 -->
+        <div class="relative flex-1">
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <i class="ph ph-magnifying-glass text-gray-400 text-lg"></i>
+          </div>
+          <input
+            type="text"
+            v-model="filterText"
+            placeholder="고객명, 이메일, 메모, 예약ID 검색..."
+            class="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition bg-white text-sm"
+          >
+          <button
+            v-if="filterText"
+            @click="filterText = ''"
+            class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+          >
+            <i class="ph ph-x-circle-fill text-lg"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- 상태 필터 그룹 -->
+      <div class="flex flex-row space-x-2">
+        <select v-model="filterStatus" class="border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm focus:ring-red-500 focus:border-red-500 cursor-pointer min-w-[120px]">
+          <option value="all">전체 상태</option>
+          <option value="true">✅ 확정</option>
+          <option value="false">🚫 취소</option>
+        </select>
+        <select v-model="filterDeposit" class="border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm focus:ring-amber-500 focus:border-amber-500 cursor-pointer min-w-[120px]">
+          <option value="all">💰 예약금 전체</option>
+          <option value="n/a">미대상</option>
+          <option value="pending">🟡 대기</option>
+          <option value="confirm">🟢 확정</option>
+          <option value="refund">🔵 환불</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 지점 필터 및 결과 수 -->
+    <div class="mt-3 pt-3 border-t border-gray-100 flex justify-between items-center">
+      <div class="flex flex-wrap gap-2 items-center">
+        <span class="text-xs font-bold text-gray-500 uppercase mr-1">지점 필터:</span>
+        <button
+          v-for="branch in branches"
+          :key="branch.id"
+          @click="toggleBranchFilter(branch.id)"
+          :class="{ 
+            'bg-red-700 text-white shadow-md ring-2 ring-red-200': isBranchSelected(branch.id),
+            'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-gray-300': !isBranchSelected(branch.id)
+          }"
+          class="px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 flex items-center"
+        >
+          <i v-if="isBranchSelected(branch.id)" class="ph-check-bold mr-1"></i>
+          {{ branch.branch_name_ko }}
+        </button>
+        <button
+          @click="clearBranchFilters"
+          v-if="filterBranchIds.length > 0"
+          class="px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors ml-auto flex items-center"
+        >
+          <i class="ph ph-arrow-counter-clockwise mr-1"></i> 초기화
+        </button>
+      </div>
+      <!-- 총 결과 수 -->
+      <div class="text-sm font-bold text-gray-600">
+        총 <span class="text-red-700">{{ filteredReservations.length }}</span> 건
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 모바일 전용 컨트롤 바 (아코디언 적용) -->
+  <details class="md:hidden bg-white p-3 rounded-xl shadow border border-gray-100 flex-shrink-0 group">
+    <summary class="flex justify-between items-center cursor-pointer list-none focus:outline-none">
+      <div class="flex items-center space-x-2">
+        <span class="text-sm font-bold text-gray-700">검색 및 정렬 설정</span>
+        <span class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">총 {{ filteredReservations.length }}건</span>
+      </div>
+      <span class="transition-transform duration-200 group-open:rotate-180 text-gray-400">
+         <i class="ph ph-caret-down text-xl"></i>
+       </span>
+    </summary>
+
+    <div class="mt-3 space-y-3 pt-3 border-t border-gray-100">
+      <!-- 날짜 선택 -->
+      <div class="flex items-center space-x-0 border border-gray-200 rounded-lg bg-gray-50 overflow-hidden">
+        <select v-model="filterDateType" class="bg-gray-100 text-xs font-bold text-gray-600 py-2 pl-2 pr-1 border-r border-gray-200 focus:outline-none h-full">
+             <option value="reservation_date">방문일</option>
+             <option value="booking_request_date">예약요청일</option>
+          </select>
+        <div class="flex items-center space-x-1 px-2 py-2 flex-1 justify-between">
+          <input type="date" v-model="filterDateStart" class="bg-transparent text-xs w-24 p-0 border-none focus:ring-0">
+          <span class="text-gray-400 text-xs">~</span>
+          <input type="date" v-model="filterDateEnd" class="bg-transparent text-xs w-24 p-0 border-none focus:ring-0">
+        </div>
+      </div>
+
+      <!-- 검색어 -->
+      <div class="relative">
+        <i class="ph ph-magnifying-glass absolute left-3 top-2.5 text-gray-400"></i>
+        <input type="text" v-model="filterText" placeholder="검색어 입력..." class="w-full pl-9 pr-8 py-2 border border-gray-200 rounded-lg text-sm">
+        <button v-if="filterText" @click="filterText=''" class="absolute right-2 top-2.5 text-gray-400"><i class="ph ph-x-circle-fill"></i></button>
+      </div>
+
+      <!-- 정렬 -->
+      <div class="flex items-center space-x-2">
+        <select v-model="sortKey" class="flex-1 border border-gray-200 rounded-lg text-sm py-2 px-2 bg-white">
+              <option value="reservation_date">방문 일시순</option>
+              <option value="booking_request_date">요청 일시순</option>
+              <option value="customer_name">고객명순</option>
+              <option value="deposit_status">예약금순</option>
+            </select>
+        <button @click="sortOrder = sortOrder * -1" class="p-2 bg-gray-100 rounded-lg text-gray-600 border border-gray-200">
+              <i :class="sortOrder === 1 ? 'ph-sort-ascending' : 'ph-sort-descending'" class="ph text-lg"></i>
+            </button>
+      </div>
+
+      <!-- 필터 -->
+      <div class="flex space-x-2">
+        <select v-model="filterStatus" class="flex-1 border border-gray-200 rounded-lg py-2 px-2 bg-white text-xs">
+              <option value="all">상태: 전체</option>
+              <option value="true">✅ 확정</option>
+              <option value="false">🚫 취소</option>
+           </select>
+        <select v-model="filterDeposit" class="flex-1 border border-gray-200 rounded-lg py-2 px-2 bg-white text-xs">
+              <option value="all">예약금: 전체</option>
+              <option value="n/a">미대상</option>
+              <option value="pending">🟡 대기</option>
+              <option value="confirm">🟢 확정</option>
+              <option value="refund">🔵 환불</option>
+           </select>
+      </div>
+    </div>
+  </details>
+
+  <!-- 3. 예약 목록 영역 -->
+  <div class="flex-1 overflow-y-auto min-h-0 bg-white rounded-xl shadow border border-gray-200 relative">
+
+    <!-- A. 데스크톱 테이블 -->
+    <div class="hidden md:block h-full overflow-auto custom-scrollbar">
+      <table class="min-w-full divide-y divide-gray-200 table-fixed">
+        <thead class="bg-gray-50 sticky top-0 z-20 shadow-sm">
+          <tr>
+            <th class="w-12 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">
+              No.</th>
+
+            <th @click="sortBy('reservation_date')"
+              class="w-36 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition sticky left-0 bg-gray-50 z-30 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.1)]">
+              방문 일시
+              <i v-if="sortKey === 'reservation_date'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 align-text-bottom text-red-600"></i>
+            </th>
+
+            <th @click="sortBy('branch_name_ko')"
+              class="w-28 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+              지점
+              <i v-if="sortKey === 'branch_name_ko'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+            </th>
+
+            <th @click="sortBy('customer_name')"
+              class="w-32 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+              고객명
+              <i v-if="sortKey === 'customer_name'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+            </th>
+
+            <th class="w-48 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase">이메일</th>
+
+            <th @click="sortBy('pax')"
+              class="w-16 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+              인원
+              <i v-if="sortKey === 'pax'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+            </th>
+
+            <th @click="sortBy('enabled')"
+              class="w-24 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+              상태
+              <i v-if="sortKey === 'enabled'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+            </th>
+
+            <th @click="sortBy('deposit_status')"
+              class="w-28 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+              예약금
+              <i v-if="sortKey === 'deposit_status'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+            </th>
+
+            <th class="w-40 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">고객 메모</th>
+            <th class="w-40 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">관리자 메모</th>
+
+            <th @click="sortBy('booking_request_date')"
+              class="w-32 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+              예약요청일
+              <i v-if="sortKey === 'booking_request_date'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+            </th>
+
+            <th class="w-20 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase">카카오톡</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200 text-sm">
+          <tr v-for="(res, index) in paginatedReservations" :key="res.id" @click="openReservationModal(res)"
+            class="group hover:bg-red-50/50 cursor-pointer transition-colors duration-150"
+            :class="{ 'bg-gray-50': !res.enabled }">
+            <!-- 1. No. -->
+            <td class="px-2 py-3 whitespace-nowrap text-center text-xs text-gray-500">
+              {{ (currentPage - 1) * itemsPerPage + index + 1 }}
+            </td>
+
+            <!-- 2. 방문일시 -->
+            <td
+              class="px-2 py-3 whitespace-nowrap sticky left-0 bg-white group-hover:bg-red-50/50 transition-colors z-10 border-r border-gray-100 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]">
+              <div class="flex flex-col">
+                <span class="font-bold text-gray-900" :class="{'text-gray-400': !res.enabled}">{{ formatDate(res.reservation_date, 'date') }}</span>
+                <span class="text-xs text-gray-500 font-mono">{{ formatDate(res.reservation_date, 'time') }}</span>
+              </div>
+            </td>
+
+            <!-- 3. 지점 -->
+            <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-600 font-medium">
+              {{ getBranchName(res.branch_id) }}
+            </td>
+
+            <!-- 4. 고객명 -->
+            <td class="px-2 py-3 whitespace-nowrap">
+              <div class="flex items-center">
+                <span class="font-bold text-gray-900 truncate max-w-[100px]" :title="res.customer_name">
+                      {{ res.customer_name }}
+                  </span>
+                <span v-if="!res.is_read" class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500 text-white animate-pulse">N</span>
+              </div>
+            </td>
+
+            <!-- 5. 이메일 -->
+            <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-500 truncate max-w-[140px]" :title="res.email">{{
+              res.email }}</td>
+
+            <!-- 6. 인원 -->
+            <td class="px-2 py-3 whitespace-nowrap text-center text-gray-700 font-bold">{{ res.pax }}</td>
+
+            <!-- 7. 예약 상태 -->
+            <td class="px-2 py-3 whitespace-nowrap text-center" @click.stop="markAsReadOnClick(res)">
+              <select
+                 :value="String(res.enabled)"
+                 @change="handleInlineStatusChange(res, 'enabled', $event.target.value)"
+                 class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-red-500"
+                 :class="res.enabled ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'"
+               >
+                 <option value="true">예약</option>
+                 <option value="false">취소</option>
+               </select>
+            </td>
+
+            <!-- 8. 예약금 상태 -->
+            <td class="px-2 py-3 whitespace-nowrap text-center" @click.stop="markAsReadOnClick(res)">
+              <select
+                 :value="res.deposit_status"
+                 @change="handleInlineStatusChange(res, 'deposit_status', $event.target.value)"
+                 class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-amber-500"
+                 :class="res.deposit_status === 'pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-100 text-green-800 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200')"
+               >
+                 <option value="n/a">미대상</option>
+                 <option value="pending">대기</option>
+                 <option value="confirm">확정</option>
+                 <option value="refund">환불</option>
+               </select>
+            </td>
+
+            <!-- 9. 고객 메모 -->
+            <td class="px-2 py-3 text-xs text-gray-500 truncate max-w-[200px]" :title="res.notes">{{ res.notes || '-' }}
+            </td>
+
+            <!-- 10. 관리자 메모 -->
+            <td class="px-2 py-3 text-xs text-gray-500 truncate max-w-[200px]" :title="res.internal_notes">
+              <span v-if="res.internal_notes" class="text-red-600 font-medium bg-red-50 px-1 rounded">{{ res.internal_notes }}</span><span v-else>-</span>
+            </td>
+
+            <!-- 11. 예약요청일 -->
+            <td class="px-2 py-3 whitespace-nowrap text-center text-xs text-gray-500 font-mono">
+              {{ formatDate(res.booking_request_date || res.created_at, 'date') }}
+            </td>
+
+            <!-- 12. 카카오톡 버튼 -->
+            <td class="px-2 py-3 whitespace-nowrap text-center text-sm font-medium">
+              <div class="flex flex-col items-center justify-center space-y-1">
+                <!-- 카카오톡 버튼 -->
+                <button
+                    @click.stop="sendKakao($event, res)"
+                    class="p-1.5 rounded hover:bg-yellow-100 text-yellow-600 bg-yellow-50 border border-yellow-200 transition shadow-sm"
+                    title="카톡 전송"
+                  >
+                    <i class="ph ph-chat-circle-dots text-xl"></i>
+                  </button>
+                <!-- 전송 일시 표시 -->
+                <span v-if="res.message_sent_at" class="text-[9px] text-gray-400 font-mono">
+                     {{ formatDate(res.message_sent_at, 'date') }}
+                  </span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Empty State (Desktop) -->
+      <div v-if="paginatedReservations.length === 0"
+        class="flex flex-col items-center justify-center py-20 text-gray-400">
+        <i class="ph ph-magnifying-glass text-5xl mb-3"></i>
+        <p class="text-lg font-medium">검색 결과가 없습니다.</p>
+        <p class="text-sm">필터 조건을 변경해보세요.</p>
+      </div>
+    </div>
+
+    <!-- B. 모바일 카드 뷰 (md 미만) -->
+    <div class="md:hidden p-4 space-y-3 pb-20">
+      <div v-for="res in paginatedReservations" :key="res.id" @click="openReservationModal(res)"
+        class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 active:bg-gray-50 active:scale-[0.99] transition-all duration-150 relative">
+        <!-- Card Header -->
+        <div class="flex justify-between items-start mb-3">
+          <div class="flex items-center space-x-3">
+            <div class="p-2 bg-red-50 rounded-lg text-red-600">
+              <i class="ph-fill ph-user text-xl"></i>
+            </div>
+            <div>
+              <div class="flex items-center">
+                <span class="text-base font-bold text-gray-900 leading-tight">{{ res.customer_name }}</span>
+                <!-- N Badge -->
+                <span v-if="!res.is_read" class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500 text-white animate-pulse">N</span>
+              </div>
+              <p class="text-xs text-gray-500 mt-0.5">
+                <i class="ph-users-fill inline align-middle text-gray-400"></i> {{ res.pax }}명
+              </p>
+            </div>
+          </div>
+
+          <!-- [FIX] 모바일 카드뷰 상태 (레이아웃 개선) -->
+          <div class="flex flex-col items-end space-y-2 mt-0.5 mr-1">
+            <!-- 1. 예약 상태 -->
+            <div class="flex items-center justify-end space-x-2">
+              <span class="text-xs text-gray-400 font-medium tracking-tight">예약</span>
+              <select
+                :value="String(res.enabled)"
+                @change="handleInlineStatusChange(res, 'enabled', $event.target.value)"
+                @click.stop="markAsReadOnClick(res)"
+                class="h-7 w-20 text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center"
+                :class="res.enabled ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'"
+              >
+                <option value="true">✅ 예약</option>
+                <option value="false">🚫 취소</option>
+              </select>
+            </div>
+
+            <!-- 2. 예약금 상태 -->
+            <div class="flex items-center justify-end space-x-2">
+              <span class="text-xs text-gray-400 font-medium tracking-tight">예약금</span>
+              <select
+                :value="res.deposit_status"
+                @change="handleInlineStatusChange(res, 'deposit_status', $event.target.value)"
+                @click.stop="markAsReadOnClick(res)"
+                class="h-7 w-20 text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center"
+                :class="res.deposit_status === 'pending' ? 'bg-amber-50 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-gray-50 text-gray-600 border-gray-100')"
+              >
+                <option value="n/a">미대상</option>
+                <option value="pending">🟡 대기</option>
+                <option value="confirm">🟢 확정</option>
+                <option value="refund">🔵 환불</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Body -->
+        <div class="space-y-2 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100">
+          <div class="flex items-center">
+            <i class="ph ph-map-pin w-5 text-gray-400 text-lg"></i><span class="font-medium text-gray-700">{{ getBranchName(res.branch_id) }}</span>
+          </div>
+          <div class="flex items-center">
+            <i class="ph ph-clock w-5 text-gray-400 text-lg"></i><span class="font-medium">{{ formatDate(res.reservation_date, 'date') }} | {{ formatDate(res.reservation_date, 'time') }}</span>
+          </div>
+          <!-- 이메일 정보 (모바일) -->
+          <div class="flex items-center" v-if="res.email">
+            <i class="ph ph-envelope-simple w-5 text-gray-400 text-lg"></i>
+            <span class="text-xs truncate">{{ res.email }}</span>
+          </div>
+          <!-- 연락처 정보 (모바일) -->
+          <div class="flex items-center" v-if="res.phone_number">
+            <i class="ph ph-phone w-5 text-gray-400 text-lg"></i>
+            <span class="text-xs truncate">{{ res.phone_number }}</span>
+          </div>
+          <!-- 메모 -->
+          <div class="flex items-center" v-if="res.notes">
+            <i class="ph ph-note w-5 text-gray-400 text-lg flex-shrink-0"></i>
+            <span class="text-xs line-clamp-2 break-all">{{ res.notes }}</span>
+          </div>
+          <!-- 관리자 메모 -->
+          <div class="flex items-center" v-if="res.internal_notes">
+            <i class="ph ph-lock-key w-5 text-red-400 text-lg flex-shrink-0"></i>
+            <span class="text-xs text-red-600 font-medium line-clamp-2 break-all">{{ res.internal_notes }}</span>
+          </div>
+          <!-- 예약요청일 (모바일) -->
+          <div class="flex items-center text-xs text-gray-400 mt-1 pt-1 border-t border-gray-200">
+            <i class="ph ph-calendar-plus w-5 text-lg"></i>
+            <span>예약요청일: {{ formatDate(res.booking_request_date || res.created_at, 'date') }}</span>
+          </div>
+        </div>
+
+        <!-- Mobile Actions -->
+        <div class="mt-3 pt-2 border-t border-gray-100 flex justify-end space-x-2 items-center">
+          <span v-if="res.message_sent_at" class="text-[10px] text-gray-400 mr-auto font-mono">전송: {{ formatDate(res.message_sent_at, 'date') }}</span>
+          <!-- Manual Confirm Button -->
+          <button
+            @click.stop="confirmKakao($event, res)"
+            class="px-3 py-1.5 rounded text-xs font-medium bg-white border border-yellow-400 text-yellow-800 flex items-center hover:bg-yellow-50 transition"
+          >
+            <i class="ph ph-check-circle mr-1.5 text-lg"></i> 완료
+          </button>
+          <!-- Send Button -->
+          <button
+            @click.stop="sendKakao($event, res)"
+            class="px-3 py-1.5 rounded text-xs font-medium border border-yellow-200 text-yellow-700 bg-yellow-50 flex items-center hover:bg-yellow-100 transition"
+          >
+            <i class="ph ph-chat-circle-dots mr-1.5 text-lg"></i> 전송
+          </button>
+        </div>
+      </div>
+      <div v-if="paginatedReservations.length === 0"
+        class="flex flex-col items-center justify-center py-10 text-gray-400">
+        <p class="text-sm">검색 결과가 없습니다.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Pagination -->
+  <div v-if="totalPage > 1"
+    class="flex-shrink-0 bg-white border-t border-gray-200 p-3 flex justify-center items-center space-x-4 shadow-inner z-30">
+    <button @click="prevPage" :disabled="currentPage === 1" class="w-10 h-10 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-30"><i class="ph ph-caret-left text-xl"></i></button>
+    <span class="text-sm font-bold text-gray-700 font-mono bg-gray-50 px-3 py-1 rounded border border-gray-200">{{ currentPage }} / {{ totalPage }}</span>
+    <button @click="nextPage" :disabled="currentPage === totalPage" class="w-10 h-10 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-30"><i class="ph ph-caret-right text-xl"></i></button>
+  </div>
+</div>
