@@ -51,14 +51,6 @@
       <?!= include('ViewDenied'); ?>
     </div>
 
-    <!-- Google One Tap -->
-    <div
-      id="g_id_onload"
-      data-client_id="25112068693-uq5e9eugragj3bpohef0qmh0m0vuifi0.apps.googleusercontent.com"
-      data-callback="handleGoogleCredential"
-      data-auto_prompt="true">
-    </div>
-
     <!-- C. Authorized App Screen -->
     <div v-else-if="appState === 'authorized'" class="flex-1 flex flex-col h-full overflow-hidden">
 
@@ -113,6 +105,14 @@
       <!-- Custom Alert/Confirm -->
       <?!= include('ModalAlert'); ?>
 
+    </div>
+
+    <!-- Google One Tap Configuration (Placed outside v-if chain) -->
+    <div
+      id="g_id_onload"
+      data-client_id="25112068693-uq5e9eugragj3bpohef0qmh0m0vuifi0.apps.googleusercontent.com"
+      data-callback="handleGoogleCredential"
+      data-auto_prompt="true">
     </div>
 
   </div>

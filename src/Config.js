@@ -27,6 +27,12 @@ const Config = {
   },
 
   // 4. Enums & Constants
+  RESERVATION_STATUS: {
+    PENDING: 'pending',
+    CONFIRM: 'confirm',
+    CANCEL: 'cancel'
+  },
+
   DEPOSIT_STATUS: {
     NA: 'n/a',          // 해당 없음 (9인 미만)
     PENDING: 'pending', // 입금 대기 (9인 이상 초기 상태)

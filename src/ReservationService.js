@@ -24,7 +24,7 @@ const ReservationService = {
     'event_id': { type: 'string' },
     
     // 상태 정보
-    'enabled': { type: 'boolean' },
+    'status': { type: 'string' },
     'is_read': { type: 'boolean' },
     'message_sent_at': { type: 'date' },
     
@@ -156,6 +156,8 @@ const ReservationService = {
           if (isNaN(safeValue)) return; // 숫자가 아니면 스킵
         } else if (schemaDef.type === 'boolean') {
           safeValue = String(rawValue) === 'true' || rawValue === true;
+        } else if (schemaDef.type === 'string') {
+          safeValue = String(rawValue);
         } else if (schemaDef.type === 'date') {
           if (!(rawValue instanceof Date)) safeValue = new Date(rawValue);
           if (isNaN(safeValue.getTime())) return; // 유효하지 않은 날짜 스킵
@@ -194,7 +196,7 @@ const ReservationService = {
       sheet.getRange(targetRowIndex, 1, 1, updatedRow.length).setValues([updatedRow]);
 
       // 6. 동기화 로직 (주요 필드 변경 시)
-      if (changes.branch_id || changes.reservation_date || changes.enabled || changes.pax || changes.customer_name) {
+      if (changes.branch_id || changes.reservation_date || changes.status || changes.pax || changes.customer_name) {
         this.syncCalendarAndSlot(currentRow, updatedRow, headers, changes);
       }
 
@@ -211,23 +213,30 @@ const ReservationService = {
    */
   updateReservationStatus(id, newStatus) {
     try {
-      if (typeof newStatus !== 'boolean') {
-        throw new Error(`newStatus (${newStatus}) is invalid (must be Boolean)`);
+      const validStatuses = Object.values(Config.RESERVATION_STATUS);
+      if (!validStatuses.includes(newStatus)) {
+        throw new Error(`newStatus (${newStatus}) is invalid`);
       }
 
       // update Google Sheet
-      const reservationUpdate = this.updateReservation(id, { enabled: newStatus });
+      const reservationUpdate = this.updateReservation(id, { status: newStatus });
       if (!reservationUpdate.success) {
         throw new Error('Fail to update sheet');
       }
 
-      if (newStatus === false) {
+      const reservation = this.getReservationById(id);
+      if (newStatus === Config.RESERVATION_STATUS.CANCEL) {
         // update Gmail Label
-        const reservation = this.getReservationById(id);
         const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.CANCEL);
         if (!labelUpdate) {
-          Logger.log(`[ReservationService] updateMessageSentAt Warn: Reservation Label 업데이트 실패`);
+          Logger.log(`[ReservationService] updateReservationStatus Warn: Reservation Label 업데이트 실패`);
         }
+      } else if (newStatus === Config.RESERVATION_STATUS.CONFIRM) {
+        const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.CONFIRM);
+        if (!labelUpdate) Logger.log(`[ReservationService] Warn: Reservation Label 업데이트 실패`);
+      } else if (newStatus === Config.RESERVATION_STATUS.PENDING) {
+        const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.PENDING);
+        if (!labelUpdate) Logger.log(`[ReservationService] Warn: Reservation Label 업데이트 실패`);
       }
 
       return Util.createResponse(true);
@@ -244,7 +253,7 @@ const ReservationService = {
     try {
       const statusNames = Object.values(this.DEPOSIT_STATUS);
       if (!statusNames.includes(newStatus)) {
-        throw new Error(`newStatus (${newStatus}) is invalid (must be one of ${"'" + implode("', '", statusNames) + "'"})`);
+        throw new Error(`newStatus (${newStatus}) is invalid (must be one of ${"'" + Object.values(this.DEPOSIT_STATUS).join("', '") + "'"})`);
       }
 
       // update Google Sheet
@@ -258,28 +267,28 @@ const ReservationService = {
         // update Gmail Label
         const labelUpdate = GmailService.deleteDepositLabel(reservation.email_thread_id);
         if (!labelUpdate) {
-          Logger.log(`[ReservationService] updateMessageSentAt Warn: Deposit Label 삭제 실패`);
+          Logger.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 삭제 실패`);
         }
       } else if (newStatus === this.DEPOSIT_STATUS.PENDING) {
         const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.PENDING);
         if (!labelUpdate) {
-          Logger.log(`[ReservationService] updateMessageSentAt Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.PENDING})`);
+          Logger.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.PENDING})`);
         }
       } else if (newStatus === this.DEPOSIT_STATUS.CONFIRM) {
         const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.CONFIRM);
         if (!labelUpdate) {
-          Logger.log(`[ReservationService] updateMessageSentAt Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.CONFIRM})`);
+          Logger.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.CONFIRM})`);
         }
       } else if (newStatus === this.DEPOSIT_STATUS.REFUND) {
         const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.REFUND);
         if (!labelUpdate) {
-          Logger.log(`[ReservationService] updateMessageSentAt Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.REFUND})`);
+          Logger.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.REFUND})`);
         }
       }
 
       return Util.createResponse(true);
     } catch (e) {
-      Logger.log(`[ReservationService] updateReservationStatus Error: ${e.message}`);
+      Logger.log(`[ReservationService] updateDepositStatus Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);
     }
   },
@@ -287,7 +296,7 @@ const ReservationService = {
   updateMessageSentAt(id) {
     try {
       // update Google Sheet
-      const reservationUpdate = this.updateReservation(id, { message_sent_at: new Date() });
+      const reservationUpdate = this.updateReservation(id, { message_sent_at: new Date(), status: Config.RESERVATION_STATUS.CONFIRM });
       if (!reservationUpdate.success) {
         throw new Error('Fail to update sheet');
       }
@@ -338,13 +347,13 @@ const ReservationService = {
       const newBranchId = getVal(newRow, 'branch_id');
       const oldDate = new Date(getVal(oldRow, 'reservation_date'));
       const newDate = new Date(getVal(newRow, 'reservation_date'));
-      const isEnabled = getVal(newRow, 'enabled');
+      const status = getVal(newRow, 'status');
       
       const calendarId = getVal(newRow, 'calendar_id');
       const eventId = getVal(newRow, 'event_id');
 
       // 1. 취소됨
-      if (!isEnabled) {
+      if (status === Config.RESERVATION_STATUS.CANCEL) {
         if (eventId) CalendarService.deleteEvent(calendarId, eventId);
         SlotService.syncSourceSlot(oldBranchId, oldDate);
         return;

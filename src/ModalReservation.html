@@ -18,11 +18,11 @@
     <div class="flex justify-between items-start mb-2">
       <h2 class="text-xl md:text-2xl font-bold text-red-800 flex items-center flex-wrap gap-2">
         {{ activeReservation.customer_name }}
-        <span 
-          :class="activeReservation.enabled ? 'bg-green-500' : 'bg-red-500'"
+        <span
+          :class="{ 'bg-green-500': activeReservation.status === 'confirm', 'bg-red-500': activeReservation.status === 'cancel', 'bg-yellow-500': activeReservation.status === 'pending' }"
           class="text-white px-2 py-0.5 text-sm rounded-full font-normal whitespace-nowrap"
         >
-          {{ activeReservation.enabled ? '예약' : '취소' }}
+          {{ activeReservation.status === 'confirm' ? '예약' : activeReservation.status === 'cancel' ? '취소' : '대기' }}
         </span>
       </h2>
       
@@ -62,14 +62,24 @@
         <div class="space-y-4">
           <h3 class="text-lg md:text-xl font-semibold border-b pb-2 text-gray-700">기본 정보</h3>
 
-          <!-- Branch -->
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">지점</label>
-            <select v-model="activeReservation.branch_id" class="w-full border border-gray-300 rounded-lg p-3 bg-gray-50 focus:ring-red-500 focus:border-red-500">
-              <option v-for="branch in branches" :value="branch.id" :key="branch.id">
-                {{ branch.branch_name_ko }}
-              </option>
-            </select>
+          <!-- Branch & Status -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">지점</label>
+              <select v-model="activeReservation.branch_id" class="w-full border border-gray-300 rounded-lg p-3 bg-white focus:ring-red-500 focus:border-red-500">
+                <option v-for="branch in branches" :value="branch.id" :key="branch.id">
+                  {{ branch.branch_name_ko }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">예약 상태</label>
+              <select v-model="activeReservation.status" class="w-full border border-gray-300 rounded-lg p-3 bg-white focus:ring-red-500 focus:border-red-500">
+                <option value="pending">예약 대기</option>
+                <option value="confirm">예약 확정</option>
+                <option value="cancel">예약 취소</option>
+              </select>
+            </div>
           </div>
 
           <!-- Date/Time/Pax (Mobile: 1 column, Desktop: 3 columns) -->
@@ -90,11 +100,11 @@
                    v-for="slot in slotMasters" 
                    :key="slot.id" 
                    :value="formatDate(slot.time, 'time')"
-                   :disabled="getSlotValue(activeReservation.branch_id, slot.id, localDateTime.date) <= 0"
-                   :class="{'text-gray-400': getSlotValue(activeReservation.branch_id, slot.id, localDateTime.date) <= 0}"
+                   :disabled="isSlotFull(activeReservation.branch_id, slot.id, localDateTime.date)"
+                   :class="{'text-gray-400': isSlotFull(activeReservation.branch_id, slot.id, localDateTime.date)}"
                  >
                    {{ formatDate(slot.time, 'time') }} 
-                   {{ getSlotValue(activeReservation.branch_id, slot.id, localDateTime.date) <= 0 ? '(마감)' : '' }}
+                   {{ isSlotFull(activeReservation.branch_id, slot.id, localDateTime.date) ? '(마감)' : '' }}
                  </option>
                  <option v-if="localDateTime.time && !slotMasters.some(s => formatDate(s.time, 'time') === localDateTime.time)" :value="localDateTime.time">
                     {{ localDateTime.time }} (설정 외)
@@ -146,14 +156,14 @@
           
           <!-- Notes (Readonly) -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">고객 메모 (Notes)</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">고객 메모</label>
             <textarea v-model="activeReservation.notes" rows="3" class="w-full border border-gray-300 rounded-lg p-3 bg-gray-50 text-sm" readonly></textarea>
           </div>
           
           <!-- Internal Notes -->
           <div>
-            <label class="block text-sm font-medium text-red-700 mb-1">관리자 메모 (Internal Notes)</label>
-            <textarea v-model="activeReservation.internal_notes" rows="3" class="w-full border border-red-300 rounded-lg p-3 bg-red-50 text-sm focus:ring-red-500 focus:border-red-500"></textarea>
+            <label class="block text-sm font-medium text-gray-700 mb-1">관리자 메모 (Internal Notes)</label>
+            <textarea v-model="activeReservation.internal_notes" rows="3" class="w-full border border-gray-300 rounded-lg p-3 bg-white text-sm focus:ring-red-500 focus:border-red-500"></textarea>
           </div>
         </div>
 
@@ -161,7 +171,7 @@
         <div class="space-y-6">
           
           <!-- Deposit -->
-          <div v-if="activeReservation.pax >= 9" class="p-4 bg-amber-50 rounded-lg shadow-inner border border-amber-200">
+          <div v-if="isGroupReservation" class="p-4 bg-amber-50 rounded-lg shadow-inner border border-amber-200">
             <h3 class="text-lg md:text-xl font-semibold text-amber-800 flex items-center mb-3 border-b border-amber-200 pb-2">
               <i class="ph ph-currency-dollar text-2xl mr-2"></i> 예약금 관리
             </h3>
@@ -225,14 +235,14 @@
                   class="px-3 py-2 bg-white border border-yellow-400 text-yellow-800 font-bold rounded-lg hover:bg-yellow-50 transition shadow-sm flex items-center text-sm"
                   title="전송 완료 수동 체크"
                >
-                  <i class="ph ph-check-circle mr-1"></i> 완료
+                  <i class="ph ph-check-circle mr-1.5"></i> 완료
                </button>
                <button 
                   type="button"
                   @click="sendKakao($event, activeReservation)"
                   class="px-4 py-2 bg-yellow-300 hover:bg-yellow-400 text-yellow-900 font-bold rounded-lg transition shadow-sm flex items-center"
                >
-                  <i class="ph ph-paper-plane-right mr-1"></i> 전송
+                  <i class="ph ph-paper-plane-right mr-1.5"></i> 전송
                </button>
              </div>
              
