@@ -236,9 +236,83 @@ function seedInitialAdmin() {
   Logger.log(`✅ 초기 관리자 생성 완료: ${email}`);
 }
 
+function testUpdateOverrideSlotsBatchMock() {
+  // 1. 기존 함수 백업
+  const originalGetSpreadsheet = Util.getSpreadsheet;
+  const originalSync = SlotService.syncSourceSlot;
+  
+  try {
+    // 2. 가짜(Mock) 스프레드시트 객체 생성
+    const mockSheet = {
+      getDataRange: () => ({ 
+        // 빈 헤더만 있는 상태를 가정
+        getValues: () => [['id', 'branch_id', 'slot_master_id', 'date', 'slot', 'reason', 'enabled', 'created_at', 'updated_at']] 
+      }),
+      getLastRow: () => 1,
+      getRange: () => ({ 
+        setValues: (vals) => console.log('[Mock] 시트에 여러 줄 추가/수정 시도:', vals), 
+        setValue: (v) => console.log('[Mock] 시트 단일 값 수정 시도:', v) 
+      }),
+      deleteRow: (idx) => console.log('[Mock] 시트 행 삭제 시도:', idx)
+    };
+    
+    // 3. 의존성 주입 (실제 시트 대신 가짜 시트 반환)
+    Util.getSpreadsheet = () => ({
+      getSheetByName: (name) => mockSheet
+    });
+    SlotService.syncSourceSlot = () => console.log('[Mock] 캘린더 동기화 호출됨');
+    
+    // 4. 일괄 업데이트 로직 테스트 실행
+    console.log('--- 가짜(Mock) 환경에서 슬롯 일괄 업데이트 테스트 시작 ---');
+    const result = SlotService.updateOverrideSlotsBatch('test-branch', '2026-04-07', {
+      'master-1': { slot: 5, enabled: true },
+      'master-2': { slot: 0, enabled: false }
+    });
+    
+    console.log('--- 테스트 결과 ---');
+    console.log(result); // 성공 여부와 생성/수정/삭제 개수 출력
+  } finally {
+    // 5. 원래 함수로 복구 (안전 장치)
+    Util.getSpreadsheet = originalGetSpreadsheet;
+    SlotService.syncSourceSlot = originalSync;
+  }
+}
+
 /**
- * [Migration] 메일 템플릿 시트만 단독 생성/초기화 (mail_template 전용)
+ * [Migration] 예약 시트의 enabled 컬럼 체크박스를 문자열(대기/확정/취소) 지원 형태로 변환
  */
+function runEnabledColumnMigration() {
+  Logger.log('🚀 [Migration] 예약 시트 enabled 컬럼 마이그레이션 시작...');
+  const ss = SpreadsheetApp.openById(Config.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(Config.SHEET_NAMES.RESERVATION);
+  
+  if (!sheet) {
+    Logger.log('❌ 시트를 찾을 수 없습니다.');
+    return;
+  }
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const enabledColIdx = headers.indexOf('enabled') + 1; // 1-based index
+
+  if (enabledColIdx === 0) {
+    Logger.log('❌ enabled 컬럼을 찾을 수 없습니다.');
+    return;
+  }
+
+  // 1. 기존 체크박스 데이터 유효성 검사 제거
+  const columnRange = sheet.getRange(2, enabledColIdx, sheet.getMaxRows() - 1, 1);
+  columnRange.clearDataValidations();
+  
+  // 2. 드롭다운(Data Validation) 규칙 새로 추가 (pending, true, false)
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['pending', 'true', 'false'], true)
+    .setAllowInvalid(false)
+    .build();
+    
+  columnRange.setDataValidation(rule);
+
+  Logger.log(`✅ [Migration] enabled 컬럼(열: ${enabledColIdx})을 문자열 드롭다운으로 변환 완료했습니다.`);
+}
 function runMailTemplateMigration() {
   const ss = SpreadsheetApp.openById(Config.SPREADSHEET_ID);
   
@@ -315,4 +389,46 @@ function seedInitialAdmin() {
   
   userSheet.appendRow(newRow);
   Logger.log(`✅ 초기 관리자 생성 완료: ${email}`);
+}
+
+function testUpdateOverrideSlotsBatchMock() {
+  // 1. 기존 함수 백업
+  const originalGetSpreadsheet = Util.getSpreadsheet;
+  const originalSync = SlotService.syncSourceSlot;
+  
+  try {
+    // 2. 가짜(Mock) 스프레드시트 객체 생성
+    const mockSheet = {
+      getDataRange: () => ({ 
+        // 빈 헤더만 있는 상태를 가정
+        getValues: () => [['id', 'branch_id', 'slot_master_id', 'date', 'slot', 'reason', 'enabled', 'created_at', 'updated_at']] 
+      }),
+      getLastRow: () => 1,
+      getRange: () => ({ 
+        setValues: (vals) => console.log('[Mock] 시트에 여러 줄 추가/수정 시도:', vals), 
+        setValue: (v) => console.log('[Mock] 시트 단일 값 수정 시도:', v) 
+      }),
+      deleteRow: (idx) => console.log('[Mock] 시트 행 삭제 시도:', idx)
+    };
+    
+    // 3. 의존성 주입 (실제 시트 대신 가짜 시트 반환)
+    Util.getSpreadsheet = () => ({
+      getSheetByName: (name) => mockSheet
+    });
+    SlotService.syncSourceSlot = () => console.log('[Mock] 캘린더 동기화 호출됨');
+    
+    // 4. 일괄 업데이트 로직 테스트 실행
+    console.log('--- 가짜(Mock) 환경에서 슬롯 일괄 업데이트 테스트 시작 ---');
+    const result = SlotService.updateOverrideSlotsBatch('test-branch', '2026-04-07', {
+      'master-1': { slot: 5, enabled: true },
+      'master-2': { slot: 0, enabled: false }
+    });
+    
+    console.log('--- 테스트 결과 ---');
+    console.log(result); // 성공 여부와 생성/수정/삭제 개수 출력
+  } finally {
+    // 5. 원래 함수로 복구 (안전 장치)
+    Util.getSpreadsheet = originalGetSpreadsheet;
+    SlotService.syncSourceSlot = originalSync;
+  }
 }
