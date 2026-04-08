@@ -58,6 +58,61 @@ function processPendingReservation() {
   if (processedCount > 0) {
     Logger.log(`[Batch] Processed ${processedCount} reservations.`);
   }
+
+  // [Retry Logic] email_thread_id 누락 건 보정 시도
+  repairMissingThreadIds();
+}
+
+/**
+ * [Retry Logic] email_thread_id가 비어있는 최근 예약 건들을 찾아 재검색 및 보정
+ */
+function repairMissingThreadIds() {
+  try {
+    const reservations = Util.getSheetDataAsObjects(Config.SHEET_NAMES.RESERVATION);
+    const now = new Date();
+    const window = 24 * 60 * 60 * 1000; // 24시간 (ms)
+
+    // 대상 필터링: ID 없고, 취소 안됐고, 생성된 지 24시간 이내인 건
+    const targets = reservations.filter(r => {
+      const createdAt = r.created_at ? new Date(r.created_at) : null;
+      return !r.email_thread_id && 
+             r.status !== Config.RESERVATION_STATUS.CANCEL && 
+             createdAt && (now - createdAt < window);
+    });
+
+    if (targets.length === 0) return;
+
+    Logger.log(`[Batch] Found ${targets.length} reservations with missing threadId. Attempting to repair...`);
+
+    // 효율성을 위해 한 번에 최대 10건만 처리
+    const limit = 10;
+    const processList = targets.slice(0, limit);
+
+    processList.forEach(res => {
+      const foundId = GmailService.findThreadId({
+        branchName: BranchService.getBranchNameEn(res.branch_id),
+        customerName: res.customer_name,
+        email: res.email,
+        pax: res.pax,
+        phoneNumber: res.phone_number,
+        startDate: new Date(res.reservation_date),
+        notes: res.notes,
+        booking_request_date: res.booking_request_date
+      });
+
+      if (foundId) {
+        // 1. 시트 업데이트
+        ReservationService.updateCell(res.id, 'email_thread_id', foundId);
+        Logger.log(`[Batch] Repaired threadId for ${res.customer_name} (${res.id})`);
+
+        // 2. 지메일 라벨 동기화 (발송 전이라도 라벨을 붙여둠)
+        GmailService.updateReservationLabel(foundId, GmailService.RESERVATION_LABELS.PENDING);
+      }
+    });
+
+  } catch (e) {
+    Logger.log(`[Batch] repairMissingThreadIds Error: ${e.message}`);
+  }
 }
 
 /**
@@ -157,7 +212,7 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
     email_thread_id: threadId || '',
     calendar_id: branchInfo.calendar_id,
     event_id: '', // 캘린더 생성 후 업데이트
-    enabled: true,
+    status: Config.RESERVATION_STATUS.PENDING,
     is_read: false,
     
     // v1.4 신규 컬럼
