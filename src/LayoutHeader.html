@@ -21,6 +21,12 @@
     <!-- 2. Right: Tabs & User Profile -->
     <div class="flex items-center space-x-3 md:space-x-4">
 
+      <!-- Sync Countdown UI -->
+      <div v-if="currentUser" class="flex items-center bg-red-900/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-red-100 text-[10px] sm:text-xs font-bold border border-red-800 shadow-inner" title="다음 자동 동기화까지 남은 시간">
+        <i class="ph ph-arrows-clockwise mr-1 sm:mr-1.5 text-xs sm:text-sm" :class="{ 'animate-spin text-amber-400': syncCountdown === 60 }"></i>
+        <span class="w-3 sm:w-4 text-center tabular-nums">{{ syncCountdown }}</span>s
+      </div>
+
       <!-- Tabs (Desktop Navigation) -->
       <nav class="hidden md:flex space-x-1 bg-red-900/50 p-1 rounded-lg backdrop-blur-sm">
         <button

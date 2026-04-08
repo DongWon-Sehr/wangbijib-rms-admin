@@ -68,6 +68,8 @@
       const appState = ref('initializing');
       const deniedMessage = ref('');
       const currentView = ref('list');
+      const syncCountdown = ref(60);
+      const isSyncing = ref(false);
       const appElement = document.getElementById('app');
       const BASE_WEBAPP_URL = appElement ? appElement.dataset.appUrl : '';
       
@@ -119,7 +121,7 @@
       const itemsPerPage = 15;
 
       // Settings
-      const settingsTab = ref('user');
+      const settingsTab = ref('slot');
       const currentSlotDate = ref(Util.formatDate(new Date(), 'date'));
       const selectedSlotBranchId = ref('');
       const selectedCalendarBranchId = ref('master');
@@ -712,8 +714,8 @@
                 deposit_amount: activeReservation.value.deposit_amount
               }
             };
-            const res = await runGoogleScript('apiSendTemplatedMail', payload);
-            if (res.success) { showCustomAlert("성공", "발송됨"); runGoogleScript('apiMarkReservationAsRead', activeReservation.value.id); } 
+            const res = await runGoogleScriptSilent('apiSendTemplatedMail', payload);
+            if (res.success) { showCustomAlert("성공", "발송됨"); runGoogleScriptSilent('apiMarkReservationAsRead', activeReservation.value.id); } 
             else showCustomAlert("실패", res.message);
           } catch (e) { showCustomAlert("오류", e.message); }
           finally { isModalLoading.value = false; }
@@ -1072,22 +1074,27 @@
           
           setInterval(async () => {
             if (appState.value !== 'authorized' || modalState.system || modalState.mail) return;
-            try {
-              const res = await runGoogleScriptSilent('apiGetReservations'); 
-              if (res.success) {
-                reservations.value = res.data;
-                
-                // [Sync] 모달이 열려있는 경우 해당 예약의 정보(threadId 등)를 업데이트
-                if (modalState.reservation && activeReservation.value) {
-                  const freshRes = res.data.find(r => r.id === activeReservation.value.id);
-                  if (freshRes && freshRes.email_thread_id && !activeReservation.value.email_thread_id) {
-                    activeReservation.value.email_thread_id = freshRes.email_thread_id;
-                    console.log(`[Sync] Updated threadId for active modal: ${freshRes.email_thread_id}`);
+            
+            syncCountdown.value--;
+            if (syncCountdown.value <= 0) {
+              syncCountdown.value = 60;
+              try {
+                const res = await runGoogleScriptSilent('apiGetReservations'); 
+                if (res.success) {
+                  reservations.value = res.data;
+                  
+                  // [Sync] 모달이 열려있는 경우 해당 예약의 정보(threadId 등)를 업데이트
+                  if (modalState.reservation && activeReservation.value) {
+                    const freshRes = res.data.find(r => r.id === activeReservation.value.id);
+                    if (freshRes && freshRes.email_thread_id && !activeReservation.value.email_thread_id) {
+                      activeReservation.value.email_thread_id = freshRes.email_thread_id;
+                      console.log(`[Sync] Updated threadId for active modal: ${freshRes.email_thread_id}`);
+                    }
                   }
                 }
-              }
-            } catch (e) { console.warn("Sync failed", e); }
-          }, 60000);
+              } catch (e) { console.warn("Sync failed", e); }
+            }
+          }, 1000);
         } catch(e) { console.error(e); alert('초기화 오류: ' + e.message); } finally { if(appState.value !== 'initializing') isLoading.value = false; }
       };
 
@@ -1096,7 +1103,7 @@
       return {
         pullDistance, isPulling, isRefreshing, handleTouchStart, handleTouchMove, handleTouchEnd,
         pullThresholdReached, pullIndicatorHeight, hasMultiplePages, isGroupReservation,
-        isLoading, loadingMessage, appState, deniedMessage, currentView, currentUser, isModalLoading,
+        isLoading, loadingMessage, appState, deniedMessage, currentView, currentUser, isModalLoading, syncCountdown,
         isProfileDropdownOpen, isMobileMenuOpen, logoutUrl, modalState, alertModal,
         activeReservation, activeSystemData,
         reservations, branches, users, mailTemplates, slotMasters, slotDefaults, slotOverrides,
