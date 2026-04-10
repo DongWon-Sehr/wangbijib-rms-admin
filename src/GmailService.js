@@ -79,7 +79,7 @@ const GmailService = {
 
       // 빈 내용 체크 (발송 중단)
       if (!templateHtml || templateHtml.trim() === '') {
-        Logger.log(`[Gmail] 템플릿(${templateId}) 내용이 비어있어 발송 중단.`);
+        console.log(`[Gmail] 템플릿(${templateId}) 내용이 비어있어 발송 중단.`);
         return Util.createResponse(false, null, 'Template is empty');
       }
 
@@ -106,12 +106,12 @@ const GmailService = {
 
       // 4. 답장 발송
       targetMessage.reply('', { htmlBody: htmlBody });
-      Logger.log(`[Gmail] Sent reply to ${threadId} using ${templateId}`);
+      console.log(`[Gmail] Sent reply to ${threadId} using ${templateId}`);
 
       return Util.createResponse(true);
 
     } catch (e) {
-      Logger.log(`[Gmail] Reply Error: ${e.message}`);
+      console.log(`[Gmail] Reply Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);
     }
   },
@@ -154,7 +154,7 @@ const GmailService = {
     try {
       return GmailApp.getThreadById(threadId);
     } catch (e) {
-      Logger.log(`[GmailService] 스레드 찾기 실패 (ID: ${threadId}): ${e.message}`);
+      console.log(`[GmailService] 스레드 찾기 실패 (ID: ${threadId}): ${e.message}`);
       return null;
     }
   },
@@ -176,16 +176,16 @@ const GmailService = {
 
       // 라벨이 없으면 새로 생성
       if (!label) {
-        Logger.log(`[GmailService] '${labelName}' 라벨이 없어 새로 생성합니다.`);
+        console.log(`[GmailService] '${labelName}' 라벨이 없어 새로 생성합니다.`);
         label = GmailApp.createLabel(labelName);
       }
 
       thread.addLabel(label);
-      Logger.log(`[GmailService] 라벨 추가 성공: ${labelName} -> ${threadId}`);
+      console.log(`[GmailService] 라벨 추가 성공: ${labelName} -> ${threadId}`);
       return true;
 
     } catch (e) {
-      Logger.log(`[GmailService] 라벨 추가 실패: ${e.message}`);
+      console.log(`[GmailService] 라벨 추가 실패: ${e.message}`);
       return false;
     }
   },
@@ -208,14 +208,14 @@ const GmailService = {
       // 라벨이 존재할 때만 삭제 시도
       if (label) {
         thread.removeLabel(label);
-        Logger.log(`[GmailService] 라벨 삭제 성공: ${labelName} -> ${threadId}`);
+        console.log(`[GmailService] 라벨 삭제 성공: ${labelName} -> ${threadId}`);
       } else {
-        Logger.log(`[GmailService] 삭제할 라벨이 존재하지 않습니다: ${labelName}`);
+        console.log(`[GmailService] 삭제할 라벨이 존재하지 않습니다: ${labelName}`);
       }
       return true;
 
     } catch (e) {
-      Logger.log(`[GmailService] 라벨 삭제 실패: ${e.message}`);
+      console.log(`[GmailService] 라벨 삭제 실패: ${e.message}`);
       return false;
     }
   },
@@ -236,7 +236,7 @@ const GmailService = {
       thread.markRead();
       return true;
     } catch (e) {
-      Logger.log(`[GmailService] 라벨 변경 실패: ${e.message}`);
+      console.log(`[GmailService] 라벨 변경 실패: ${e.message}`);
       return false;
     }
   },
@@ -258,7 +258,7 @@ const GmailService = {
 
       return true;
     } catch (e) {
-      Logger.log(`[GmailService] 라벨 변경 실패: ${e.message}`);
+      console.log(`[GmailService] 라벨 변경 실패: ${e.message}`);
       return false;
     }
   },
@@ -277,7 +277,7 @@ const GmailService = {
 
       return true;
     } catch (e) {
-      Logger.log(`[GmailService] 라벨 변경 실패: ${e.message}`);
+      console.log(`[GmailService] 라벨 변경 실패: ${e.message}`);
       return false;
     }
   },
@@ -314,7 +314,7 @@ const GmailService = {
       }
 
       const query = queryParts.join(' ');
-      Logger.log(`[Gmail] Searching Thread: ${query}`);
+      console.log(`[Gmail] Searching Thread: ${query}`);
 
       const threads = GmailApp.search(query);
       const SEARCH_WINDOW_MINUTES = 5;
@@ -333,7 +333,7 @@ const GmailService = {
       return null;
 
     } catch (e) {
-      Logger.log(`[Gmail] Find Thread Error: ${e.message}`);
+      console.log(`[Gmail] Find Thread Error: ${e.message}`);
       return null;
     }
   },

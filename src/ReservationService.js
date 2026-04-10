@@ -67,7 +67,7 @@ const ReservationService = {
         return reservations.filter(r => allowed.includes(r.branch_id));
       }
     } catch (e) {
-      Logger.log(`[ReservationService] getAll Error: ${e.message}`);
+      console.log(`[ReservationService] getAll Error: ${e.message}`);
       throw e;
     }
   },
@@ -203,7 +203,7 @@ const ReservationService = {
       return Util.createResponse(true);
 
     } catch (e) {
-      Logger.log(`[ReservationService] Update Error: ${e.message}`);
+      console.log(`[ReservationService] Update Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);
     }
   },
@@ -229,19 +229,19 @@ const ReservationService = {
         // update Gmail Label
         const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.CANCEL);
         if (!labelUpdate) {
-          Logger.log(`[ReservationService] updateReservationStatus Warn: Reservation Label 업데이트 실패`);
+          console.log(`[ReservationService] updateReservationStatus Warn: Reservation Label 업데이트 실패`);
         }
       } else if (newStatus === Config.RESERVATION_STATUS.CONFIRM) {
         const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.CONFIRM);
-        if (!labelUpdate) Logger.log(`[ReservationService] Warn: Reservation Label 업데이트 실패`);
+        if (!labelUpdate) console.log(`[ReservationService] Warn: Reservation Label 업데이트 실패`);
       } else if (newStatus === Config.RESERVATION_STATUS.PENDING) {
         const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.PENDING);
-        if (!labelUpdate) Logger.log(`[ReservationService] Warn: Reservation Label 업데이트 실패`);
+        if (!labelUpdate) console.log(`[ReservationService] Warn: Reservation Label 업데이트 실패`);
       }
 
       return Util.createResponse(true);
     } catch (e) {
-      Logger.log(`[ReservationService] updateReservationStatus Error: ${e.message}`);
+      console.log(`[ReservationService] updateReservationStatus Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);
     }
   },
@@ -267,28 +267,28 @@ const ReservationService = {
         // update Gmail Label
         const labelUpdate = GmailService.deleteDepositLabel(reservation.email_thread_id);
         if (!labelUpdate) {
-          Logger.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 삭제 실패`);
+          console.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 삭제 실패`);
         }
       } else if (newStatus === this.DEPOSIT_STATUS.PENDING) {
         const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.PENDING);
         if (!labelUpdate) {
-          Logger.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.PENDING})`);
+          console.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.PENDING})`);
         }
       } else if (newStatus === this.DEPOSIT_STATUS.CONFIRM) {
         const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.CONFIRM);
         if (!labelUpdate) {
-          Logger.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.CONFIRM})`);
+          console.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.CONFIRM})`);
         }
       } else if (newStatus === this.DEPOSIT_STATUS.REFUND) {
         const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.REFUND);
         if (!labelUpdate) {
-          Logger.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.REFUND})`);
+          console.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.REFUND})`);
         }
       }
 
       return Util.createResponse(true);
     } catch (e) {
-      Logger.log(`[ReservationService] updateDepositStatus Error: ${e.message}`);
+      console.log(`[ReservationService] updateDepositStatus Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);
     }
   },
@@ -305,12 +305,12 @@ const ReservationService = {
       const reservation = this.getReservationById(id);
       const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.CONFIRM);
       if (!labelUpdate) {
-        Logger.log(`[ReservationService] updateMessageSentAt Warn: Reservation Label 업데이트 실패`);
+        console.log(`[ReservationService] updateMessageSentAt Warn: Reservation Label 업데이트 실패`);
       }
 
       return Util.createResponse(true);
     } catch (e) {
-      Logger.log(`[ReservationService] updateMessageSentAt Error: ${e.message}`);
+      console.log(`[ReservationService] updateMessageSentAt Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);
     }
   },
@@ -384,7 +384,7 @@ const ReservationService = {
       }
 
     } catch (e) {
-      Logger.log(`[Sync] Fail: ${e.message}`);
+      console.log(`[Sync] Fail: ${e.message}`);
     }
   },
 
