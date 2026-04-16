@@ -245,7 +245,8 @@
 
             <!-- 2. 방문일시 -->
             <td
-              class="px-2 py-3 whitespace-nowrap sticky left-0 bg-white group-hover:bg-red-50/50 transition-colors z-10 border-r border-gray-100 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]">
+              class="px-2 py-3 whitespace-nowrap sticky left-0 group-hover:bg-red-50/50 transition-colors z-10 border-r border-gray-100 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]"
+              :class="res.status === 'cancel' ? 'bg-gray-50' : (res.status === 'pending' ? 'bg-amber-50' : 'bg-white')">
               <div class="flex flex-col">
                 <span class="font-bold text-gray-900" :class="{ 'text-gray-400': res.status === 'cancel' }">{{ formatDate(res.reservation_date, 'date') }}</span>
                 <span class="text-xs text-gray-500 font-mono">{{ formatDate(res.reservation_date, 'time') }}</span>

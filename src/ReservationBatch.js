@@ -4,14 +4,14 @@
  * - 예약금 정책(9인 이상) 자동 적용
  */
 function processPendingReservation() {
-  Logger.log(`[Batch] Start processing...`);
+  console.log(`[Batch] Start processing...`);
   
   const ss = Util.getSpreadsheet();
   const resSheet = ss.getSheetByName(Config.SHEET_NAMES.RAW_REQUEST); // Responses
   const dbSheet = ss.getSheetByName(Config.SHEET_NAMES.RESERVATION); // reservation
 
   if (!resSheet || !dbSheet) {
-    Logger.log('[Batch] Sheet not found.');
+    console.log('[Batch] Sheet not found.');
     return;
   }
 
@@ -50,13 +50,13 @@ function processPendingReservation() {
         processSingleReservation(row, rowIndex, resSheet, dbSheet, IDX);
         processedCount++;
       } catch (e) {
-        Logger.log(`[Batch] Error at row ${rowIndex}: ${e.message}`);
+        console.log(`[Batch] Error at row ${rowIndex}: ${e.message}`);
       }
     }
   }
 
   if (processedCount > 0) {
-    Logger.log(`[Batch] Processed ${processedCount} reservations.`);
+    console.log(`[Batch] Processed ${processedCount} reservations.`);
   }
 
   // [Retry Logic] email_thread_id 누락 건 보정 시도
@@ -82,7 +82,7 @@ function repairMissingThreadIds() {
 
     if (targets.length === 0) return;
 
-    Logger.log(`[Batch] Found ${targets.length} reservations with missing threadId. Attempting to repair...`);
+    console.log(`[Batch] Found ${targets.length} reservations with missing threadId. Attempting to repair...`);
 
     // 효율성을 위해 한 번에 최대 10건만 처리
     const limit = 10;
@@ -103,7 +103,7 @@ function repairMissingThreadIds() {
       if (foundId) {
         // 1. 시트 업데이트
         ReservationService.updateCell(res.id, 'email_thread_id', foundId);
-        Logger.log(`[Batch] Repaired threadId for ${res.customer_name} (${res.id})`);
+        console.log(`[Batch] Repaired threadId for ${res.customer_name} (${res.id})`);
 
         // 2. 지메일 라벨 동기화 (발송 전이라도 라벨을 붙여둠)
         GmailService.updateReservationLabel(foundId, GmailService.RESERVATION_LABELS.PENDING);
@@ -111,7 +111,7 @@ function repairMissingThreadIds() {
     });
 
   } catch (e) {
-    Logger.log(`[Batch] repairMissingThreadIds Error: ${e.message}`);
+    console.log(`[Batch] repairMissingThreadIds Error: ${e.message}`);
   }
 }
 
@@ -134,13 +134,13 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
 
   // 필수 값 검증
   if (!rawData.branchName || !rawData.startDate || !rawData.customerName) {
-    Logger.log(`[Batch] Missing required fields at row ${rowIndex}`);
+    console.log(`[Batch] Missing required fields at row ${rowIndex}`);
     return;
   }
 
   // 'Group Reservation' 지점명은 무시 (기존 로직 유지)
   if (rawData.branchName === 'Group Reservation') {
-    Logger.log(`[Batch] Skip 'Group Reservation' at row ${rowIndex}`);
+    console.log(`[Batch] Skip 'Group Reservation' at row ${rowIndex}`);
     return; 
   }
 
@@ -243,7 +243,8 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
   dbSheet.appendRow(dbRow);
 
   // 9. 슬롯 동기화 (Source Calendar) - 마감 여부 체크
-  SlotService.syncSourceSlot(branchInfo.id, reservationDate);
+  const syncMsg = SlotService.syncSourceSlot(branchInfo.id, reservationDate);
+  if (syncMsg) console.log(syncMsg);
 
   // 10. 자동 메일 발송 (조건부)
   if (threadId && depositStatus === Config.DEPOSIT_STATUS.PENDING) {
@@ -267,15 +268,15 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
       );
 
       if (mailResult.success) {
-        Logger.log(`[Batch] Deposit mail sent to ${rawData.customerName}`);
+        console.log(`[Batch] Deposit mail sent to ${rawData.customerName}`);
         GmailService.updateDepositLabel(threadId, GmailService.DEPOSIT_LABELS.PENDING);
       } else {
         // 템플릿 비어있음 등으로 발송 안됨
-        Logger.log(`[Batch] Mail send skipped: ${mailResult.message}`);
+        console.log(`[Batch] Mail send skipped: ${mailResult.message}`);
       }
     } else {
       // 템플릿 비어있음 등으로 발송 안됨
-      Logger.log(`[Batch] Mail send skipped: maxPaxOverError`);
+      console.log(`[Batch] Mail send skipped: maxPaxOverError`);
     }
   }
   
@@ -283,4 +284,151 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
     // 예약 대기 라벨 처리 (선택사항)
     GmailService.updateDepositLabel(threadId, GmailService.RESERVATION_LABELS.PENDING);
   }
+}
+
+/**
+ * [Trigger] 백그라운드 슬롯 동기화 큐 처리 (일반 - 이어달리기 방식)
+ * - 3초마다 깨어나서 SLOT_SYNC_QUEUE에 있는 작업을 처리
+ */
+function triggerBackgroundSlotSync() {
+  console.log('[Batch] triggerBackgroundSlotSync start');
+  const props = PropertiesService.getScriptProperties();
+  const QUEUE_KEY = 'SLOT_SYNC_QUEUE';
+  const HANDLER_NAME = 'triggerBackgroundSlotSync';
+
+  try {
+    const queueStr = props.getProperty(QUEUE_KEY);
+    if (!queueStr) return;
+
+    let queue = [];
+    try {
+      queue = JSON.parse(queueStr);
+    } catch (e) {
+      props.deleteProperty(QUEUE_KEY);
+      return;
+    }
+
+    if (queue.length === 0) return;
+
+    // 1. 큐에서 작업 하나 꺼내기 (FIFO)
+    const task = queue.shift();
+    const daysRemaining = task.daysTotal - task.daysProcessed;
+    
+    if (daysRemaining > 0) {
+      const dayWindow = 10; 
+      const daysToProcess = Math.min(dayWindow, daysRemaining);
+      const startMs = task.startDateMs + (task.daysProcessed * 24 * 60 * 60 * 1000);
+      
+      SlotService.syncFutureSlots(task.branchId, startMs, daysToProcess);
+      
+      task.daysProcessed += daysToProcess;
+      if (task.daysProcessed < task.daysTotal) {
+        queue.push(task);
+      }
+    }
+
+    // 2. 남은 큐 저장 및 트리거 관리
+    if (queue.length > 0) {
+      props.setProperty(QUEUE_KEY, JSON.stringify(queue));
+      
+      // 기존 트리거 청소 후 다음 바통 터치
+      const triggers = ScriptApp.getProjectTriggers();
+      triggers.forEach(t => {
+        if (t.getHandlerFunction() === HANDLER_NAME) ScriptApp.deleteTrigger(t);
+      });
+      
+      ScriptApp.newTrigger(HANDLER_NAME).timeBased().after(3 * 1000).create();
+    } else {
+      props.deleteProperty(QUEUE_KEY);
+      console.log(`[Batch] ${HANDLER_NAME} finished. Queue empty.`);
+    }
+
+  } catch (e) {
+    console.log(`[Batch] ${HANDLER_NAME} error: ${e.message}`);
+    props.deleteProperty(QUEUE_KEY);
+  }
+}
+
+/**
+ * [Trigger] 긴급 슬롯 동기화 큐 처리 (수동 요청용 - 병렬 실행)
+ * - 사용자가 UI에서 설정을 바꿨을 때 SLOT_URGENT_QUEUE를 처리
+ */
+function triggerUrgentSlotSync() {
+  console.log('[Batch] triggerUrgentSlotSync start');
+  const props = PropertiesService.getScriptProperties();
+  const QUEUE_KEY = 'SLOT_URGENT_QUEUE';
+  const HANDLER_NAME = 'triggerUrgentSlotSync';
+
+  try {
+    const queueStr = props.getProperty(QUEUE_KEY);
+    if (!queueStr) return;
+
+    let queue = [];
+    try {
+      queue = JSON.parse(queueStr);
+    } catch (e) {
+      props.deleteProperty(QUEUE_KEY);
+      return;
+    }
+
+    if (queue.length === 0) return;
+
+    // 1. 큐에서 작업 하나 꺼내기 (FIFO)
+    const task = queue.shift();
+    const daysRemaining = task.daysTotal - task.daysProcessed;
+    
+    if (daysRemaining > 0) {
+      const dayWindow = 10; 
+      const daysToProcess = Math.min(dayWindow, daysRemaining);
+      const startMs = task.startDateMs + (task.daysProcessed * 24 * 60 * 60 * 1000);
+      
+      SlotService.syncFutureSlots(task.branchId, startMs, daysToProcess);
+      
+      task.daysProcessed += daysToProcess;
+      if (task.daysProcessed < task.daysTotal) {
+        queue.push(task);
+      }
+    }
+
+    // 2. 남은 큐 저장 및 트리거 관리
+    if (queue.length > 0) {
+      props.setProperty(QUEUE_KEY, JSON.stringify(queue));
+      
+      const triggers = ScriptApp.getProjectTriggers();
+      triggers.forEach(t => {
+        if (t.getHandlerFunction() === HANDLER_NAME) ScriptApp.deleteTrigger(t);
+      });
+      
+      ScriptApp.newTrigger(HANDLER_NAME).timeBased().after(3 * 1000).create();
+    } else {
+      props.deleteProperty(QUEUE_KEY);
+      console.log(`[Batch] ${HANDLER_NAME} finished. Queue empty.`);
+    }
+
+  } catch (e) {
+    console.log(`[Batch] ${HANDLER_NAME} error: ${e.message}`);
+    props.deleteProperty(QUEUE_KEY);
+  }
+}
+
+/**
+ * [Batch] 매일 새벽에 실행되어 향후 40일간의 슬롯을 동기화 (Track 2)
+ * - Time-driven trigger로 매일 새벽 실행
+ * - 직접 처리하지 않고 큐에 넣어서 이어달리기 시작
+ */
+function processDailySlotSync() {
+  console.log('[Batch] processDailySlotSync start');
+  try {
+    const branches = BranchService.getAllBranches();
+    const activeBranches = branches.filter(b => b.enabled === true || String(b.enabled) === 'true');
+    
+    // 활성화된 각 지점을 큐에 등록하여 비동기로 처리하도록 위임
+    activeBranches.forEach(branch => {
+      SlotService.enqueueDefaultSlotSync(branch.id);
+    });
+
+  } catch (e) {
+    console.log(`[Batch] processDailySlotSync error: ${e.message}`);
+  }
+  console.log('[Batch] processDailySlotSync end');
 }
