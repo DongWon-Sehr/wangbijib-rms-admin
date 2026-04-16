@@ -641,6 +641,14 @@
         }
       };
 
+      const handleManualRefresh = async () => {
+        if (isSyncing.value || isLoading.value) return;
+        isSyncing.value = true;
+        syncCountdown.value = 60;
+        await refreshInitialData(true);
+        isSyncing.value = false;
+      };
+
       const refreshInitialData = async (silent) => {
         if(typeof silent === 'undefined') silent = false;
         try {
@@ -900,9 +908,17 @@
             d = { branch_id: activeSystemData.value.data.branch_id, payload: payload };
           }
         }
-        const res = await runGoogleScript('apiSaveSystemSettings', apiType, d);
-        if (res.success) { showCustomAlert("완료", "저장됨"); await refreshInitialData(); closeModal('system'); } 
-        else showCustomAlert("오류", res.message);
+        
+        isModalLoading.value = true;
+        try {
+          const res = await runGoogleScriptSilent('apiSaveSystemSettings', apiType, d);
+          if (res.success) { showCustomAlert("완료", "저장됨"); await refreshInitialData(); closeModal('system'); } 
+          else showCustomAlert("오류", res.message);
+        } catch(e) {
+          showCustomAlert("오류", e.message);
+        } finally {
+          isModalLoading.value = false;
+        }
       };
       
       const openSlotBatchModal = (type) => {
@@ -1074,6 +1090,7 @@
           
           setInterval(async () => {
             if (appState.value !== 'authorized' || modalState.system || modalState.mail) return;
+            if (isSyncing.value) return;
             
             syncCountdown.value--;
             if (syncCountdown.value <= 0) {
@@ -1103,7 +1120,7 @@
       return {
         pullDistance, isPulling, isRefreshing, handleTouchStart, handleTouchMove, handleTouchEnd,
         pullThresholdReached, pullIndicatorHeight, hasMultiplePages, isGroupReservation,
-        isLoading, loadingMessage, appState, deniedMessage, currentView, currentUser, isModalLoading, syncCountdown,
+        isLoading, loadingMessage, appState, deniedMessage, currentView, currentUser, isModalLoading, syncCountdown, isSyncing,
         isProfileDropdownOpen, isMobileMenuOpen, logoutUrl, modalState, alertModal,
         activeReservation, activeSystemData,
         reservations, branches, users, mailTemplates, slotMasters, slotDefaults, slotOverrides,
@@ -1114,7 +1131,7 @@
         activeCalendarId, calendarIframeSrc, slotMasterMap,
         setCurrentView, setCurrentViewAndCloseMenu, toggleProfileDropdown, toggleMobileMenu, 
         runGoogleScript, openModal, closeModal, showCustomAlert, showCustomConfirm, handleAlertResult,
-        refreshInitialData, formatDate: Util.formatDate,
+        refreshInitialData, handleManualRefresh, formatDate: Util.formatDate,
         getBranchName, getDepositStatusLabel, getDepositBadgeClass, sortBy, toggleBranchFilter, isBranchSelected, clearBranchFilters,
         handleInlineStatusChange, sendKakao, confirmKakao, markAsReadOnClick,
         prevPage, nextPage, getUserRoleBadge, confirmDeleteUser, 
