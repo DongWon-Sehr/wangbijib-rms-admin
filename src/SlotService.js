@@ -61,13 +61,23 @@ const SlotService = {
    * @param {Array} targetEventsCache - (Optional) 캐시된 지점 캘린더 예약 이벤트 목록
    * @param {Array} sourceEventsCache - (Optional) 캐시된 소스 캘린더 블로킹 이벤트 목록
    * @param {boolean} returnLog - (Optional) 로그를 콘솔에 찍지 않고 문자열로 반환할지 여부
+   * @param {Array} batchRequests - (Optional) Batch API 전송을 위해 요청을 모으는 배열
    */
-  syncSourceSlot(branchId, dateObj, overrideList = null, defaultList = null, masterList = null, targetEventsCache = null, sourceEventsCache = null, returnLog = false) {
+  syncSourceSlot(
+    branchId,
+    dateObj,
+    masterList = null,
+    defaultList = null,
+    overrideList = null,
+    targetEventsCache = null,
+    sourceEventsCache = null,
+    batchRequests = null
+  ) {
     try {
       const branchNameEn = BranchService.getBranchNameEn(branchId);
       const targetCalId = BranchService.getCalendarId(branchId);
       
-      if (!branchNameEn || !targetCalId) return returnLog ? '' : undefined;
+      if (!branchNameEn || !targetCalId) return undefined;
 
       // 1. 최대 슬롯 조회
       const maxSlot = this.getMaxSlot(branchId, dateObj, overrideList, defaultList, masterList);
@@ -76,25 +86,31 @@ const SlotService = {
       const currentCount = CalendarService.getEventCount(targetCalId, dateObj, targetEventsCache);
 
       const logMsg = `[SyncSlot] ${branchNameEn} ${dateObj} | Cur: ${currentCount} / Max: ${maxSlot}`;
-      if (!returnLog) {
-        console.log(logMsg);
-      }
 
       // 3. 정책 적용
       if (currentCount < maxSlot) {
         // 여유 있음 -> 블로킹 이벤트 삭제 (슬롯 오픈)
-        CalendarService.deleteSourceBlockingEvent(branchNameEn, dateObj, sourceEventsCache);
+        if (batchRequests) {
+           const req = CalendarService.deleteSourceBlockingEventRequest(branchNameEn, dateObj, sourceEventsCache);
+           if (req) batchRequests.push(req);
+        } else {
+           CalendarService.deleteSourceBlockingEvent(branchNameEn, dateObj, sourceEventsCache);
+        }
       } else {
         // 마감 -> 블로킹 이벤트 생성 (슬롯 닫기)
-        CalendarService.createSourceBlockingEvent(branchNameEn, dateObj, sourceEventsCache);
+        if (batchRequests) {
+           const req = CalendarService.createSourceBlockingEventRequest(branchNameEn, dateObj, sourceEventsCache);
+           if (req) batchRequests.push(req);
+        } else {
+           CalendarService.createSourceBlockingEvent(branchNameEn, dateObj, sourceEventsCache);
+        }
       }
       
-      return returnLog ? logMsg : undefined;
+      return logMsg;
 
     } catch (e) {
       const errMsg = `[SlotService] Sync Error: ${e.message}`;
-      if (!returnLog) console.log(errMsg);
-      return returnLog ? errMsg : undefined;
+      return errMsg;
     }
   },
 
@@ -464,6 +480,8 @@ const SlotService = {
       const targetEventsCache = CalendarService.getEventsInRange(targetCalId, chunkStart, chunkEnd);
       const sourceEventsCache = CalendarService.getEventsInRange(sourceCalId, chunkStart, chunkEnd);
 
+      const batchRequests = []; // 구글 캘린더 Batch API용 요청 배열
+
       // 지정된 시작일부터 days 만큼 처리
       for (let i = 0; i < days; i++) {
         const targetDate = new Date(startDateMs + (i * 24 * 60 * 60 * 1000));
@@ -480,12 +498,32 @@ const SlotService = {
           syncDateObj.setHours(hh, mm, 0, 0);
 
           // 캐시된 배열들을 전달하여 구글 시트 및 캘린더 API 호출을 우회 (returnLog=true로 로그 메시지만 받아옴)
-          const resultMsg = this.syncSourceSlot(branchId, syncDateObj, slotsData.overrides, slotsData.defaults, slotsData.masters, targetEventsCache, sourceEventsCache, true);
+          // batchRequests 배열도 같이 전달하여 API 직접 호출 대신 Request Object 수집
+          const resultMsg = 
+            this.syncSourceSlot(
+              branchId,
+              syncDateObj,
+              slotsData.masters,
+              slotsData.defaults,
+              slotsData.overrides,
+              targetEventsCache,
+              sourceEventsCache,
+              batchRequests
+            );
           if (resultMsg) logQueue.push(resultMsg);
         });
       }
+
+      // 모아진 모든 삭제/생성 요청을 Batch API로 한 번에 전송 (타임아웃 방지)
+      if (batchRequests.length > 0) {
+        CalendarService.executeBatchRequests(batchRequests);
+        logQueue.push(`[SlotService] Batch request sent: ${batchRequests.length} operations.`);
+      } else {
+        logQueue.push(`[SlotService] Batch request skip: 0 request.`);
+      }
+
     } catch (e) {
-      console.log(`[SlotService] syncFutureSlots Error: ${e.message}`);
+      logQueue.push(`[SlotService] syncFutureSlots Error: ${e.message}`);
     } finally {
       // 모아둔 로그를 한 번에 출력 (API 호출 1번으로 압축)
       if (logQueue.length > 0) {

@@ -243,7 +243,8 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
   dbSheet.appendRow(dbRow);
 
   // 9. 슬롯 동기화 (Source Calendar) - 마감 여부 체크
-  SlotService.syncSourceSlot(branchInfo.id, reservationDate);
+  const syncMsg = SlotService.syncSourceSlot(branchInfo.id, reservationDate);
+  if (syncMsg) console.log(syncMsg);
 
   // 10. 자동 메일 발송 (조건부)
   if (threadId && depositStatus === Config.DEPOSIT_STATUS.PENDING) {
@@ -314,8 +315,8 @@ function triggerBackgroundSlotSync() {
     const daysRemaining = task.daysTotal - task.daysProcessed;
     
     if (daysRemaining > 0) {
-      const chunkSize = 20; 
-      const daysToProcess = Math.min(chunkSize, daysRemaining);
+      const dayWindow = 10; 
+      const daysToProcess = Math.min(dayWindow, daysRemaining);
       const startMs = task.startDateMs + (task.daysProcessed * 24 * 60 * 60 * 1000);
       
       SlotService.syncFutureSlots(task.branchId, startMs, daysToProcess);
@@ -377,8 +378,8 @@ function triggerUrgentSlotSync() {
     const daysRemaining = task.daysTotal - task.daysProcessed;
     
     if (daysRemaining > 0) {
-      const chunkSize = 20; 
-      const daysToProcess = Math.min(chunkSize, daysRemaining);
+      const dayWindow = 10; 
+      const daysToProcess = Math.min(dayWindow, daysRemaining);
       const startMs = task.startDateMs + (task.daysProcessed * 24 * 60 * 60 * 1000);
       
       SlotService.syncFutureSlots(task.branchId, startMs, daysToProcess);

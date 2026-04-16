@@ -355,26 +355,29 @@ const ReservationService = {
       // 1. 취소됨
       if (status === Config.RESERVATION_STATUS.CANCEL) {
         if (eventId) CalendarService.deleteEvent(calendarId, eventId);
-        SlotService.syncSourceSlot(oldBranchId, oldDate);
+        const syncMsg = SlotService.syncSourceSlot(oldBranchId, oldDate);
+        if (syncMsg) console.log(syncMsg);
         return;
       }
 
       // 2. 지점/날짜 변경 (이동)
       if (changes.branch_id || changes.reservation_date) {
         if (eventId) CalendarService.deleteEvent(calendarId, eventId);
-        SlotService.syncSourceSlot(oldBranchId, oldDate); // 구 슬롯 해제
+        const oldSyncMsg = SlotService.syncSourceSlot(oldBranchId, oldDate); // 구 슬롯 해제
+        if (oldSyncMsg) console.log(oldSyncMsg);
 
         const targetCalId = BranchService.getCalendarId(newBranchId);
         const title = `${getVal(newRow, 'customer_name')} (${getVal(newRow, 'pax')})`;
         // [Changed] Use internal method _buildEventDesc
         const desc = this._buildEventDesc(newRow, headers);
-        
+
         const newEventId = CalendarService.createEvent(targetCalId, title, newDate, desc);
         this.updateCell(getVal(newRow, 'id'), 'calendar_id', targetCalId);
         this.updateCell(getVal(newRow, 'id'), 'event_id', newEventId);
 
-        SlotService.syncSourceSlot(newBranchId, newDate); // 신규 슬롯 반영
-      } 
+        const newSyncMsg = SlotService.syncSourceSlot(newBranchId, newDate); // 신규 슬롯 반영
+        if (newSyncMsg) console.log(newSyncMsg);
+      }
       // 3. 내용만 변경
       else if (changes.customer_name || changes.pax || changes.notes || changes.internal_notes) {
         const title = `${getVal(newRow, 'customer_name')} (${getVal(newRow, 'pax')})`;
