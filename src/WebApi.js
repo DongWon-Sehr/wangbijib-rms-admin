@@ -22,7 +22,7 @@ function doPost(e) {
   try {
     // 1. 카카오가 보낸 데이터 파싱
     const postData = JSON.parse(e.postData.contents);
-    Logger.log("[Webhook] 수신 데이터: " + JSON.stringify(postData));
+    console.log("[Webhook] 수신 데이터: " + JSON.stringify(postData));
 
     // 2. reservation_id 확인
     const reservationId = postData.reservation_id;
@@ -40,7 +40,7 @@ function doPost(e) {
         throw new Error(`업데이트 실패: ${result.message}`);
       }
       
-      Logger.log(`[Webhook] 예약(${reservationId}) 전송일시 업데이트 완료: ${now}`);
+      console.log(`[Webhook] 예약(${reservationId}) 전송일시 업데이트 완료: ${now}`);
     }
 
     // 4. 응답
@@ -48,7 +48,7 @@ function doPost(e) {
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
-    Logger.log("[Webhook Error] " + err.message);
+    console.log("[Webhook Error] " + err.message);
     return ContentService.createTextOutput(JSON.stringify({ success: false }))
       .setMimeType(ContentService.MimeType.JSON);
   }
@@ -97,12 +97,12 @@ function _executeApi(apiName, action, params = null) {
     paramLog = 'Stringify Error';
   }
 
-  Logger.log(`▶ [API Start] ${apiName} | Params: ${paramLog}`);
+  console.log(`▶ [API Start] ${apiName} | Params: ${paramLog}`);
 
   try {
     const result = action();
     const duration = new Date().getTime() - startTime;
-    Logger.log(`✅ [API End] ${apiName} (${duration}ms)`);
+    console.log(`✅ [API End] ${apiName} (${duration}ms)`);
     
     if (result && typeof result.success === 'boolean') {
       return result;
@@ -110,8 +110,8 @@ function _executeApi(apiName, action, params = null) {
     return Util.createResponse(true, result);
   } catch (err) {
     const duration = new Date().getTime() - startTime;
-    Logger.log(`🔥 [API Error] ${apiName} (${duration}ms) | Params: ${paramLog} | Error: ${err.message}`);
-    if (err.stack) Logger.log(err.stack);
+    console.log(`🔥 [API Error] ${apiName} (${duration}ms) | Params: ${paramLog} | Error: ${err.message}`);
+    if (err.stack) console.log(err.stack);
 
     return Util.createResponse(false, null, err.message);
   }

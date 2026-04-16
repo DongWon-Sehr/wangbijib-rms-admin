@@ -36,7 +36,7 @@ const Util = {
     const ss = this.getSpreadsheet();
     const sheet = ss.getSheetByName(sheetName);
     if (!sheet) {
-      Logger.log(`[Util] 시트를 찾을 수 없음: ${sheetName}`);
+      console.log(`[Util] 시트를 찾을 수 없음: ${sheetName}`);
       return [];
     }
 
@@ -108,7 +108,7 @@ const Util = {
       // default: datetime
       return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
     } catch (e) {
-      Logger.log(`[Util] Date Parsing Error: ${e.message}`);
+      console.log(`[Util] Date Parsing Error: ${e.message}`);
       return String(value);
     }
   },

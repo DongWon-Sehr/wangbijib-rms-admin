@@ -51,7 +51,7 @@ const UserService = {
       return Util.createResponse(true, userInfo);
 
     } catch (e) {
-      Logger.log(`[UserService] Session Check Error: ${e.message}`);
+      console.log(`[UserService] Session Check Error: ${e.message}`);
       return Util.createResponse(false, null, `인증 오류: ${e.message}`);
     }
   },

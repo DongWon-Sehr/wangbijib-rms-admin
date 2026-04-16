@@ -160,7 +160,7 @@ function runSchemaMigration() {
     }
   ];
 
-  Logger.log('🚀 [Migration] 스키마 마이그레이션 시작...');
+  console.log('🚀 [Migration] 스키마 마이그레이션 시작...');
 
   schemas.forEach(schema => {
     let sheet = ss.getSheetByName(schema.name);
@@ -168,7 +168,7 @@ function runSchemaMigration() {
     if (!sheet) {
       // 1. 시트가 없으면 생성
       sheet = ss.insertSheet(schema.name);
-      Logger.log(`✅ [Create] 시트 생성됨: ${schema.name}`);
+      console.log(`✅ [Create] 시트 생성됨: ${schema.name}`);
       
       // 2. 헤더 추가
       sheet.appendRow(schema.headers);
@@ -184,17 +184,17 @@ function runSchemaMigration() {
 
     } else {
       // 시트가 이미 존재할 경우 (헤더 비교 등 고도화 가능하지만 일단 스킵)
-      Logger.log(`ℹ️ [Skip] 이미 존재하는 시트: ${schema.name}`);
+      console.log(`ℹ️ [Skip] 이미 존재하는 시트: ${schema.name}`);
       
       // (옵션) 헤더가 비어있으면 채워넣기
       if (sheet.getLastRow() === 0) {
         sheet.appendRow(schema.headers);
-        Logger.log(`   └─ 헤더가 비어있어 추가했습니다.`);
+        console.log(`   └─ 헤더가 비어있어 추가했습니다.`);
       }
     }
   });
 
-  Logger.log('✨ [Migration] 마이그레이션 완료.');
+  console.log('✨ [Migration] 마이그레이션 완료.');
 }
 
 /**
@@ -206,7 +206,7 @@ function seedInitialAdmin() {
   const userSheet = ss.getSheetByName(Config.SHEET_NAMES.USER);
   
   if (!userSheet) {
-    Logger.log('User 시트가 없습니다. runSchemaMigration을 먼저 실행하세요.');
+    console.log('User 시트가 없습니다. runSchemaMigration을 먼저 실행하세요.');
     return;
   }
 
@@ -216,7 +216,7 @@ function seedInitialAdmin() {
   // 이미 존재하는지 확인
   for (let i = 1; i < data.length; i++) {
     if (data[i][1] === email) { // user_email is index 1
-      Logger.log(`이미 등록된 관리자입니다: ${email}`);
+      console.log(`이미 등록된 관리자입니다: ${email}`);
       return;
     }
   }
@@ -233,7 +233,7 @@ function seedInitialAdmin() {
   ];
   
   userSheet.appendRow(newRow);
-  Logger.log(`✅ 초기 관리자 생성 완료: ${email}`);
+  console.log(`✅ 초기 관리자 생성 완료: ${email}`);
 }
 
 function testUpdateOverrideSlotsBatchMock() {
@@ -282,12 +282,12 @@ function testUpdateOverrideSlotsBatchMock() {
  * [Migration] 예약 시트의 enabled 컬럼 체크박스를 문자열(대기/확정/취소) 지원 형태로 변환
  */
 function runEnabledColumnMigration() {
-  Logger.log('🚀 [Migration] 예약 시트 enabled 컬럼 마이그레이션 시작...');
+  console.log('🚀 [Migration] 예약 시트 enabled 컬럼 마이그레이션 시작...');
   const ss = SpreadsheetApp.openById(Config.SPREADSHEET_ID);
   const sheet = ss.getSheetByName(Config.SHEET_NAMES.RESERVATION);
   
   if (!sheet) {
-    Logger.log('❌ 시트를 찾을 수 없습니다.');
+    console.log('❌ 시트를 찾을 수 없습니다.');
     return;
   }
 
@@ -295,7 +295,7 @@ function runEnabledColumnMigration() {
   const enabledColIdx = headers.indexOf('enabled') + 1; // 1-based index
 
   if (enabledColIdx === 0) {
-    Logger.log('❌ enabled 컬럼을 찾을 수 없습니다.');
+    console.log('❌ enabled 컬럼을 찾을 수 없습니다.');
     return;
   }
 
@@ -311,7 +311,7 @@ function runEnabledColumnMigration() {
     
   columnRange.setDataValidation(rule);
 
-  Logger.log(`✅ [Migration] enabled 컬럼(열: ${enabledColIdx})을 문자열 드롭다운으로 변환 완료했습니다.`);
+  console.log(`✅ [Migration] enabled 컬럼(열: ${enabledColIdx})을 문자열 드롭다운으로 변환 완료했습니다.`);
 }
 function runMailTemplateMigration() {
   const ss = SpreadsheetApp.openById(Config.SPREADSHEET_ID);
@@ -322,14 +322,14 @@ function runMailTemplateMigration() {
     note: '메일 템플릿 관리'
   };
 
-  Logger.log(`🚀 [Migration] ${schema.name} 시트 단독 마이그레이션 시작...`);
+  console.log(`🚀 [Migration] ${schema.name} 시트 단독 마이그레이션 시작...`);
 
   let sheet = ss.getSheetByName(schema.name);
   
   if (!sheet) {
     // 1. 시트가 없으면 생성
     sheet = ss.insertSheet(schema.name);
-    Logger.log(`✅ [Create] 시트 생성됨: ${schema.name}`);
+    console.log(`✅ [Create] 시트 생성됨: ${schema.name}`);
     
     // 2. 헤더 추가
     sheet.appendRow(schema.headers);
@@ -340,16 +340,16 @@ function runMailTemplateMigration() {
     headerRange.setBackground('#f3f3f3');
     sheet.setFrozenRows(1);
   } else {
-    Logger.log(`ℹ️ [Skip] 이미 존재하는 시트: ${schema.name}`);
+    console.log(`ℹ️ [Skip] 이미 존재하는 시트: ${schema.name}`);
     
     // (옵션) 헤더가 비어있으면 채워넣기
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(schema.headers);
-      Logger.log(`   └─ 헤더가 비어있어 추가했습니다.`);
+      console.log(`   └─ 헤더가 비어있어 추가했습니다.`);
     }
   }
 
-  Logger.log('✨ [Migration] 메일 템플릿 처리 완료.');
+  console.log('✨ [Migration] 메일 템플릿 처리 완료.');
 }
 
 /**
@@ -361,7 +361,7 @@ function seedInitialAdmin() {
   const userSheet = ss.getSheetByName(Config.SHEET_NAMES.USER);
   
   if (!userSheet) {
-    Logger.log('User 시트가 없습니다. runSchemaMigration을 먼저 실행하세요.');
+    console.log('User 시트가 없습니다. runSchemaMigration을 먼저 실행하세요.');
     return;
   }
 
@@ -371,7 +371,7 @@ function seedInitialAdmin() {
   // 이미 존재하는지 확인
   for (let i = 1; i < data.length; i++) {
     if (data[i][1] === email) { // user_email is index 1
-      Logger.log(`이미 등록된 관리자입니다: ${email}`);
+      console.log(`이미 등록된 관리자입니다: ${email}`);
       return;
     }
   }
@@ -388,7 +388,7 @@ function seedInitialAdmin() {
   ];
   
   userSheet.appendRow(newRow);
-  Logger.log(`✅ 초기 관리자 생성 완료: ${email}`);
+  console.log(`✅ 초기 관리자 생성 완료: ${email}`);
 }
 
 function testUpdateOverrideSlotsBatchMock() {
@@ -431,4 +431,26 @@ function testUpdateOverrideSlotsBatchMock() {
     Util.getSpreadsheet = originalGetSpreadsheet;
     SlotService.syncSourceSlot = originalSync;
   }
+}
+/**
+ * [임시 유틸리티] 멈춰있는 큐 및 쓸데없는 트리거를 모두 초기화합니다.
+ */
+function cleanAllQueuesAndTriggers() {
+  const props = PropertiesService.getScriptProperties();
+  
+  // 1. 저장된 큐 데이터 모두 삭제
+  props.deleteProperty('SLOT_SYNC_QUEUE');
+  props.deleteProperty('PENDING_SYNC_BRANCHES');
+  
+  // 2. 실행 중이거나 예약된 백그라운드 트리거 모두 삭제
+  const triggers = ScriptApp.getProjectTriggers();
+  let deletedCount = 0;
+  for (let i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'triggerBackgroundSlotSync') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      deletedCount++;
+    }
+  }
+  
+  console.log(`[Clean] 큐 초기화 완료. 삭제된 트리거 수: ${deletedCount}`);
 }
