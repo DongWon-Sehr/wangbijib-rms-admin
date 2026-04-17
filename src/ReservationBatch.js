@@ -97,7 +97,7 @@ function repairMissingThreadIds() {
         phoneNumber: res.phone_number,
         startDate: new Date(res.reservation_date),
         notes: res.notes,
-        booking_request_date: res.booking_request_date
+        bookingRequestDate: new Date(res.booking_request_date)
       });
 
       if (foundId) {
@@ -206,22 +206,20 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
     reservation_date: reservationDate,
     customer_name: rawData.customerName,
     pax: rawData.pax,
-    notes: rawData.notes,
+    notes: "'" + rawData.notes,
     phone_number: "'" + rawData.phoneNumber,
     email: rawData.email,
     email_thread_id: threadId || '',
     calendar_id: branchInfo.calendar_id,
     event_id: '', // 캘린더 생성 후 업데이트
-    status: Config.RESERVATION_STATUS.PENDING,
-    is_read: false,
-    
-    // v1.4 신규 컬럼
     internal_notes: '',
+    is_read: false,
     deposit_status: depositStatus,
     deposit_amount: depositAmount,
     deposit_paid_at: '',
     deposit_refund_at: '',
-    
+    message_sent_at: '',
+    status: Config.RESERVATION_STATUS.PENDING,
     created_at: now,
     updated_at: now
   };

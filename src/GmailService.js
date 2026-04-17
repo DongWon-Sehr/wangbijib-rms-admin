@@ -227,9 +227,9 @@ const GmailService = {
         throw new Error(`스레드를 찾을 수 없습니다. (ID: ${threadId})`);
       }
 
-      const lableNames = Object.values(this.RESERVATION_LABELS);
-      if (lableNames.includes(labelName)) {
-        lableNames.forEach(targetLabel => this._removeLabel(threadId, targetLabel));
+      const labelNames = Object.values(this.RESERVATION_LABELS);
+      if (labelNames.includes(labelName)) {
+        labelNames.forEach(targetLabel => this._removeLabel(threadId, targetLabel));
       }
 
       this._addLabel(threadId, labelName);
@@ -248,9 +248,9 @@ const GmailService = {
         throw new Error(`스레드를 찾을 수 없습니다. (ID: ${threadId})`);
       }
 
-      const lableNames = Object.values(this.DEPOSIT_LABELS);
-      if (lableNames.includes(labelName)) {
-        lableNames.forEach(targetLabel => this._removeLabel(threadId, targetLabel));
+      const labelNames = Object.values(this.DEPOSIT_LABELS);
+      if (labelNames.includes(labelName)) {
+        labelNames.forEach(targetLabel => this._removeLabel(threadId, targetLabel));
       }
 
       this._addLabel(threadId, labelName);
@@ -270,8 +270,8 @@ const GmailService = {
         throw new Error(`스레드를 찾을 수 없습니다. (ID: ${threadId})`);
       }
 
-      const lableNames = Object.values(this.DEPOSIT_LABELS);
-      lableNames.forEach(targetLabel => this._removeLabel(threadId, targetLabel));
+      const labelNames = Object.values(this.DEPOSIT_LABELS);
+      labelNames.forEach(targetLabel => this._removeLabel(threadId, targetLabel));
       
       thread.markRead();
 
