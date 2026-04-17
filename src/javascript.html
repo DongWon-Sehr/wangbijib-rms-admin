@@ -1082,6 +1082,7 @@
           
           window.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
+              if (isModalLoading.value) return; // 스피너 동작 중일 때 ESC 키 무시
               if (modalState.reservation) closeModal('reservation');
               else if (modalState.system) closeModal('system');
               else if (modalState.mail) closeModal('mail');

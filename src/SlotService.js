@@ -215,17 +215,18 @@ const SlotService = {
           mastersToSync.push(masterId);
         } else {
           // Insert
-          newRows.push([
-            Utilities.getUuid(), // id
-            branchId,            // branch_id
-            masterId,            // slot_master_id
-            targetDateObj,       // date (Date Object)
-            slotVal,             // slot
-            "일괄 설정",          // reason
-            enabledVal,          // enabled
-            new Date(),          // created_at
-            new Date()           // updated_at
-          ]);
+          const newObj = {
+            id: Util.getUuid(),
+            branch_id: branchId,
+            slot_master_id: masterId,
+            date: targetDateObj,
+            slot: slotVal,
+            reason: "일괄 설정",
+            enabled: enabledVal,
+            created_at: new Date(),
+            updated_at: new Date()
+          };
+          newRows.push(Util.convertObjectToRow(newObj, ovHeaders));
           mastersToSync.push(masterId);
         }
       }
