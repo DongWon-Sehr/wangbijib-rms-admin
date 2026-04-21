@@ -20,10 +20,19 @@ const Config = {
 
   // 3. Deposit Policy
   DEPOSIT: {
-    THRESHOLD_PAX: 9, // 예약금이 적용되는 최소 인원 (9인 이상)
-    BASE_AMOUNT: 100, // 기본 예약금 ($100 USD)
-    UNIT_PAX: 10,     // 증액 단위 인원 (10명 단위)
-    UNIT_AMOUNT: 100  // 증액 단위 금액 ($100 USD)
+    THRESHOLD_PAX: 9,     // 예약금이 적용되는 최소 인원 (9인 이상)
+    BASE_AMOUNT: 100000,  // 기본 예약금 (10 만원)
+    UNIT_PAX: 10,         // 증액 단위 인원 (10명 단위)
+    UNIT_AMOUNT: 100000   // 증액 단위 금액 (10 만원)
+  },
+
+  // 3-1. Deposit URLs
+  DEPOSIT_URLS: {
+    100000: 'https://wangbijibkbbq.cafe24.com/shop5/surl/O/57',
+    200000: 'https://wangbijibkbbq.cafe24.com/shop5/surl/O/58',
+    300000: 'https://wangbijibkbbq.cafe24.com/shop5/surl/O/59',
+    400000: 'https://wangbijibkbbq.cafe24.com/shop5/surl/O/60',
+    500000: 'https://wangbijibkbbq.cafe24.com/shop5/surl/O/61',
   },
 
   // 4. Enums & Constants
