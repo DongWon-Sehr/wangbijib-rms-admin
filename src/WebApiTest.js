@@ -89,18 +89,46 @@ function apiSendTestMail(templateName, testEmail) {
       reservation_date: new Date(),
       pax: 4,
       notes: '테스트 발송입니다.',
-      deposit_amount: 100
+      deposit_amount: 100000
     };
     
     // 현재 로그인한 유저에게 보냄 (GmailApp.sendEmail 사용 - 스레드 없음)
-    const template = HtmlService.createTemplateFromFile(templateName);
-    let body = template.evaluate().getContent();
-    body = GmailService.replacePlaceholders(body, dummyData);
+    let templateHtml = MailTemplateService.getTemplateHtmlById(templateName);
+    if (!templateHtml) {
+      throw new Error(`템플릿을 찾을 수 없습니다: ${templateName}`);
+    }
     
-    GmailApp.sendEmail(testEmail, `[Test] ${templateName}`, '', { htmlBody: body });
+    templateHtml = GmailService.replacePlaceholders(templateHtml, dummyData);
+    templateHtml = GmailService._encodeEmojisToEntities(templateHtml);
+    
+    const htmlBody = 
+      '<!DOCTYPE html>' +
+      '<html>' +
+      '<head>' +
+        '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">' +
+          '<style>' +
+            'body { font-family: sans-serif; line-height: 1.2; margin: 0; padding: 0; }' +
+            'div, p { margin: 0; padding: 0; }' +
+          '</style>' +
+      '</head>' +
+      '<body>' +
+        '<div>' + templateHtml + '</div>' +
+      '</body>' +
+      '</html>';
+    
+    GmailApp.sendEmail(testEmail, `[Test] 메일 테스트`, '', { htmlBody: htmlBody });
     
     return "테스트 메일이 발송되었습니다.";
   });
+}
+
+function testApiSendTestMail() {
+  const testEmail = Session.getActiveUser().getEmail();
+  const templateId = Config.MAIL_TEMPLATES.DEPOSIT_PENDING; // 테스트에 사용할 템플릿 ID (Config에 정의되어 있어야 함)
+  
+  console.log(`테스트 발송 시작... 대상 이메일: ${testEmail}, 템플릿 ID: ${templateId}`);
+  const result = apiSendTestMail(templateId, testEmail);
+  console.log('발송 결과:', result);
 }
 
 /**

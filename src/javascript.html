@@ -187,7 +187,15 @@
         isPulling.value = false;
       };
 
-      const availableKeywords = ['customer_name', 'branch_name_en', 'pax', 'reservation_date', 'reservation_time', 'deposit_amount'];
+      const availableKeywords = [
+        'customer_name',
+        'branch_name_en',
+        'pax',
+        'reservation_date',
+        'reservation_time',
+        'deposit_amount',
+        'deposit_url'
+      ];
       const modalTitle = ref('');
 
       // ============================================================
@@ -1030,7 +1038,8 @@
           pax: '4',
           reservation_date: 'Jan 1',
           reservation_time: '18:30',
-          deposit_amount: '100'
+          deposit_amount: '100000',
+          deposit_url: 'https://example.deposit.url',
         };
         
         // 1. [FIX] Handle existing badge spans (from Editor)

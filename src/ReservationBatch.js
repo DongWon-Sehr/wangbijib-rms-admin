@@ -5,7 +5,7 @@
  */
 function processPendingReservation() {
   console.log(`[Batch] Start processing...`);
-  
+
   const ss = Util.getSpreadsheet();
   const resSheet = ss.getSheetByName(Config.SHEET_NAMES.RAW_REQUEST); // Responses
   const dbSheet = ss.getSheetByName(Config.SHEET_NAMES.RESERVATION); // reservation
@@ -34,13 +34,13 @@ function processPendingReservation() {
     REQ_DATE: 10,
     RES_ID: 11
   };
-  
+
   let processedCount = 0;
 
   // 1행은 헤더이므로 1부터 시작
   for (let i = 1; i < values.length; i++) {
     const row = values[i];
-    const responseId = row[IDX.RES_ID]; 
+    const responseId = row[IDX.RES_ID];
     const branchName = row[IDX.BRANCH];
 
     // [조건] Response ID가 없고 지점명이 있는 경우 = 신규 예약
@@ -75,9 +75,9 @@ function repairMissingThreadIds() {
     // 대상 필터링: ID 없고, 취소 안됐고, 생성된 지 24시간 이내인 건
     const targets = reservations.filter(r => {
       const createdAt = r.created_at ? new Date(r.created_at) : null;
-      return !r.email_thread_id && 
-             r.status !== Config.RESERVATION_STATUS.CANCEL && 
-             createdAt && (now - createdAt < window);
+      return !r.email_thread_id &&
+        r.status !== Config.RESERVATION_STATUS.CANCEL &&
+        createdAt && (now - createdAt < window);
     });
 
     if (targets.length === 0) return;
@@ -141,14 +141,14 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
   // 'Group Reservation' 지점명은 무시 (기존 로직 유지)
   if (rawData.branchName === 'Group Reservation') {
     console.log(`[Batch] Skip 'Group Reservation' at row ${rowIndex}`);
-    return; 
+    return;
   }
 
   // 2. 지점 정보 조회 (BranchService)
   // Responses 시트의 지점명은 영문(branch_name_en)이라고 가정
   const branches = BranchService.getAllBranches();
   const branchInfo = branches.find(b => b.branch_name_en === rawData.branchName);
-  
+
   if (!branchInfo) {
     throw new Error(`Branch not found: ${rawData.branchName}`);
   }
@@ -165,8 +165,7 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
   let maxPaxOverError = false;
   if (rawData.pax >= Config.DEPOSIT.THRESHOLD_PAX) {
     depositStatus = Config.DEPOSIT_STATUS.PENDING;
-    
-    // 금액 계산: 9~20명=$100, 21~30명=$200 ...
+
     if (rawData.pax <= 19) {
       depositAmount = Config.DEPOSIT.BASE_AMOUNT;
     } else {
@@ -176,7 +175,8 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
       depositAmount = Config.DEPOSIT.BASE_AMOUNT + (extraUnits * Config.DEPOSIT.UNIT_AMOUNT);
     }
 
-    if (rawData.pax > 60) {
+    // 59명 초과 시 에러 처리 (기존 60명에서 59명으로 기준 변경)
+    if (rawData.pax > 59) {
       maxPaxOverError = true;
     }
   }
@@ -228,9 +228,9 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
   // 이벤트 설명에 필요한 정보 구성
   const title = `${rawData.customerName} (${rawData.pax})`;
   const desc = `\n이름: ${rawData.customerName}\n인원: ${rawData.pax}\n노트: ${rawData.notes}\n이메일: ${rawData.email}`;
-  
+
   const eventId = CalendarService.createEvent(branchInfo.calendar_id, title, reservationDate, desc);
-  
+
   if (eventId) {
     reservationObj.event_id = eventId;
   }
@@ -249,7 +249,7 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
     // 템플릿용 데이터
     const mailData = {
       customer_name: rawData.customerName,
-      branch_name_en: rawData.branchName, 
+      branch_name_en: rawData.branchName,
       reservation_date: reservationDate,
       reservation_time: Util.formatDate(reservationDate, 'time'),
       pax: rawData.pax,
@@ -260,8 +260,8 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
     if (maxPaxOverError === false) {
       // 예약금 대기 안내 메일 발송
       const mailResult = GmailService.replyToThreadWithTemplate(
-        threadId, 
-        Config.MAIL_TEMPLATES.DEPOSIT_PENDING, 
+        threadId,
+        Config.MAIL_TEMPLATES.DEPOSIT_PENDING,
         mailData
       );
 
@@ -277,7 +277,7 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
       console.log(`[Batch] Mail send skipped: maxPaxOverError`);
     }
   }
-  
+
   if (threadId) {
     // 예약 대기 라벨 처리 (선택사항)
     GmailService.updateDepositLabel(threadId, GmailService.RESERVATION_LABELS.PENDING);
@@ -311,14 +311,14 @@ function triggerBackgroundSlotSync() {
     // 1. 큐에서 작업 하나 꺼내기 (FIFO)
     const task = queue.shift();
     const daysRemaining = task.daysTotal - task.daysProcessed;
-    
+
     if (daysRemaining > 0) {
-      const dayWindow = 10; 
+      const dayWindow = 10;
       const daysToProcess = Math.min(dayWindow, daysRemaining);
       const startMs = task.startDateMs + (task.daysProcessed * 24 * 60 * 60 * 1000);
-      
+
       SlotService.syncFutureSlots(task.branchId, startMs, daysToProcess);
-      
+
       task.daysProcessed += daysToProcess;
       if (task.daysProcessed < task.daysTotal) {
         queue.push(task);
@@ -328,13 +328,13 @@ function triggerBackgroundSlotSync() {
     // 2. 남은 큐 저장 및 트리거 관리
     if (queue.length > 0) {
       props.setProperty(QUEUE_KEY, JSON.stringify(queue));
-      
+
       // 기존 트리거 청소 후 다음 바통 터치
       const triggers = ScriptApp.getProjectTriggers();
       triggers.forEach(t => {
         if (t.getHandlerFunction() === HANDLER_NAME) ScriptApp.deleteTrigger(t);
       });
-      
+
       ScriptApp.newTrigger(HANDLER_NAME).timeBased().after(3 * 1000).create();
     } else {
       props.deleteProperty(QUEUE_KEY);
@@ -374,14 +374,14 @@ function triggerUrgentSlotSync() {
     // 1. 큐에서 작업 하나 꺼내기 (FIFO)
     const task = queue.shift();
     const daysRemaining = task.daysTotal - task.daysProcessed;
-    
+
     if (daysRemaining > 0) {
-      const dayWindow = 10; 
+      const dayWindow = 10;
       const daysToProcess = Math.min(dayWindow, daysRemaining);
       const startMs = task.startDateMs + (task.daysProcessed * 24 * 60 * 60 * 1000);
-      
+
       SlotService.syncFutureSlots(task.branchId, startMs, daysToProcess);
-      
+
       task.daysProcessed += daysToProcess;
       if (task.daysProcessed < task.daysTotal) {
         queue.push(task);
@@ -391,12 +391,12 @@ function triggerUrgentSlotSync() {
     // 2. 남은 큐 저장 및 트리거 관리
     if (queue.length > 0) {
       props.setProperty(QUEUE_KEY, JSON.stringify(queue));
-      
+
       const triggers = ScriptApp.getProjectTriggers();
       triggers.forEach(t => {
         if (t.getHandlerFunction() === HANDLER_NAME) ScriptApp.deleteTrigger(t);
       });
-      
+
       ScriptApp.newTrigger(HANDLER_NAME).timeBased().after(3 * 1000).create();
     } else {
       props.deleteProperty(QUEUE_KEY);
@@ -419,7 +419,7 @@ function processDailySlotSync() {
   try {
     const branches = BranchService.getAllBranches();
     const activeBranches = branches.filter(b => b.enabled === true || String(b.enabled) === 'true');
-    
+
     // 활성화된 각 지점을 큐에 등록하여 비동기로 처리하도록 위임
     activeBranches.forEach(branch => {
       SlotService.enqueueDefaultSlotSync(branch.id);

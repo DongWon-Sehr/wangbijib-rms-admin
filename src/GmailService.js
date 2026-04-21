@@ -123,12 +123,27 @@ const GmailService = {
     let result = html;
 
     // 기본 키워드 치환
-    const keys = ['customer_name', 'branch_name_en', 'pax', 'notes', 'deposit_amount'];
+    const keys = [
+      'customer_name',
+      'branch_name_en',
+      'pax',
+      'notes',
+      'deposit_amount',
+    ];
     keys.forEach(key => {
       // [[key]] 패턴 사용
       // 특수문자 이스케이프: [ -> \\[, ] -> \\]
       const regex = new RegExp('\\[\\[' + key + '\\]\\]', 'g');
-      result = result.replace(regex, data[key] || '');
+      let replaceValue = data[key] || '';
+      
+      // deposit_amount는 콤마(,) 포맷팅 처리
+      if (key === 'deposit_amount' && typeof data[key] === 'number') {
+        replaceValue = data[key].toLocaleString();
+      } else if (key === 'deposit_amount' && !isNaN(Number(data[key])) && data[key]) {
+        replaceValue = Number(data[key]).toLocaleString();
+      }
+      
+      result = result.replace(regex, replaceValue);
     });
 
     // 날짜 포맷팅 특수 처리 (Dec 3)
@@ -140,6 +155,11 @@ const GmailService = {
       result = result.replace(/\[\[reservation_date\]\]/g, dateStr);
       result = result.replace(/\[\[reservation_time\]\]/g, Util.formatDate(dateObj, 'time'));
     }
+
+    // DEPOSIT_URL 치환
+    const depositAmountKey = Number(data.deposit_amount);
+    const depositUrl = (depositAmountKey && !isNaN(depositAmountKey)) ? (Config.DEPOSIT_URLS[depositAmountKey] ?? '') : '';
+    result = result.replace(/\[\[deposit_url\]\]/g, depositUrl);
 
     return result;
   },
