@@ -290,11 +290,15 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
  */
 function triggerBackgroundSlotSync() {
   console.log('[Batch] triggerBackgroundSlotSync start');
+  const lock = LockService.getScriptLock();
   const props = PropertiesService.getScriptProperties();
   const QUEUE_KEY = 'SLOT_SYNC_QUEUE';
   const HANDLER_NAME = 'triggerBackgroundSlotSync';
 
   try {
+    // 1. Lock 획득 (최대 30초 대기)
+    lock.waitLock(30000);
+
     const queueStr = props.getProperty(QUEUE_KEY);
     if (!queueStr) return;
 
@@ -306,9 +310,12 @@ function triggerBackgroundSlotSync() {
       return;
     }
 
-    if (queue.length === 0) return;
+    if (queue.length === 0) {
+      props.deleteProperty(QUEUE_KEY);
+      return;
+    }
 
-    // 1. 큐에서 작업 하나 꺼내기 (FIFO)
+    // 2. 큐에서 작업 하나 꺼내기 (FIFO)
     const task = queue.shift();
     const daysRemaining = task.daysTotal - task.daysProcessed;
 
@@ -317,6 +324,7 @@ function triggerBackgroundSlotSync() {
       const daysToProcess = Math.min(dayWindow, daysRemaining);
       const startMs = task.startDateMs + (task.daysProcessed * 24 * 60 * 60 * 1000);
 
+      // 동기화 실행 (Lock 해제 전 처리하여 안정성 확보 - syncFutureSlots 내부에서 API 호출)
       SlotService.syncFutureSlots(task.branchId, startMs, daysToProcess);
 
       task.daysProcessed += daysToProcess;
@@ -325,7 +333,7 @@ function triggerBackgroundSlotSync() {
       }
     }
 
-    // 2. 남은 큐 저장 및 트리거 관리
+    // 3. 남은 큐 저장 및 트리거 관리
     if (queue.length > 0) {
       props.setProperty(QUEUE_KEY, JSON.stringify(queue));
 
@@ -343,7 +351,9 @@ function triggerBackgroundSlotSync() {
 
   } catch (e) {
     console.log(`[Batch] ${HANDLER_NAME} error: ${e.message}`);
-    props.deleteProperty(QUEUE_KEY);
+    // 에러 발생 시 큐를 삭제하지 않고 유지 (다음 트리거 혹은 배치에서 재시도)
+  } finally {
+    if (lock.hasLock()) lock.releaseLock();
   }
 }
 
@@ -353,11 +363,15 @@ function triggerBackgroundSlotSync() {
  */
 function triggerUrgentSlotSync() {
   console.log('[Batch] triggerUrgentSlotSync start');
+  const lock = LockService.getScriptLock();
   const props = PropertiesService.getScriptProperties();
   const QUEUE_KEY = 'SLOT_URGENT_QUEUE';
   const HANDLER_NAME = 'triggerUrgentSlotSync';
 
   try {
+    // 1. Lock 획득
+    lock.waitLock(30000);
+
     const queueStr = props.getProperty(QUEUE_KEY);
     if (!queueStr) return;
 
@@ -369,9 +383,12 @@ function triggerUrgentSlotSync() {
       return;
     }
 
-    if (queue.length === 0) return;
+    if (queue.length === 0) {
+      props.deleteProperty(QUEUE_KEY);
+      return;
+    }
 
-    // 1. 큐에서 작업 하나 꺼내기 (FIFO)
+    // 2. 큐에서 작업 하나 꺼내기 (FIFO)
     const task = queue.shift();
     const daysRemaining = task.daysTotal - task.daysProcessed;
 
@@ -388,7 +405,7 @@ function triggerUrgentSlotSync() {
       }
     }
 
-    // 2. 남은 큐 저장 및 트리거 관리
+    // 3. 남은 큐 저장 및 트리거 관리
     if (queue.length > 0) {
       props.setProperty(QUEUE_KEY, JSON.stringify(queue));
 
@@ -405,7 +422,8 @@ function triggerUrgentSlotSync() {
 
   } catch (e) {
     console.log(`[Batch] ${HANDLER_NAME} error: ${e.message}`);
-    props.deleteProperty(QUEUE_KEY);
+  } finally {
+    if (lock.hasLock()) lock.releaseLock();
   }
 }
 
@@ -418,12 +436,18 @@ function processDailySlotSync() {
   console.log('[Batch] processDailySlotSync start');
   try {
     const branches = BranchService.getAllBranches();
-    const activeBranches = branches.filter(b => b.enabled === true || String(b.enabled) === 'true');
+    console.log(`[Batch] Found ${branches.length} total branches from sheet.`);
+    
+    const activeBranchIds = branches
+      .filter(b => b.enabled === true || String(b.enabled) === 'true')
+      .map(b => b.id);
+    
+    console.log(`[Batch] Active branches to process: ${activeBranchIds.length}`);
 
-    // 활성화된 각 지점을 큐에 등록하여 비동기로 처리하도록 위임
-    activeBranches.forEach(branch => {
-      SlotService.enqueueDefaultSlotSync(branch.id);
-    });
+    // 활성화된 지점들을 큐에 한 번에 등록 (트리거 부하 최적화)
+    if (activeBranchIds.length > 0) {
+      SlotService.enqueueSlotSyncBatch(activeBranchIds);
+    }
 
   } catch (e) {
     console.log(`[Batch] processDailySlotSync error: ${e.message}`);
