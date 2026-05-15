@@ -405,55 +405,89 @@ const SlotService = {
    * @param {string} branchId - 지점 ID
    * @param {boolean} isUrgent - 긴급 모드 여부 (UI 수동 수정 시 true)
    */
-  enqueueDefaultSlotSync(branchId, isUrgent = false) {
+  /**
+   * [Queue] 지점 목록을 한꺼번에 동기화 큐에 추가 (최적화 버전)
+   * @param {Array<string>} branchIds - 지점 ID 배열
+   * @param {boolean} isUrgent - 긴급 모드 여부
+   */
+  enqueueSlotSyncBatch(branchIds, isUrgent = false) {
+    if (!Array.isArray(branchIds) || branchIds.length === 0) return;
+
+    const lock = LockService.getScriptLock();
     try {
+      // 1. Lock 획득 시도 (최대 30초 대기)
+      lock.waitLock(30000);
+
       const props = PropertiesService.getScriptProperties();
       
-      // 1. 큐 설정 (일반/긴급 분리)
+      // 2. 큐 설정 (일반/긴급 분리)
       const QUEUE_KEY = isUrgent ? 'SLOT_URGENT_QUEUE' : 'SLOT_SYNC_QUEUE';
       const HANDLER_NAME = isUrgent ? 'triggerUrgentSlotSync' : 'triggerBackgroundSlotSync';
 
-      // 2. 큐 데이터 로드
+      // 3. 큐 데이터 로드
       let queueStr = props.getProperty(QUEUE_KEY);
       let queue = [];
       if (queueStr) {
         try {
           queue = JSON.parse(queueStr);
         } catch (e) {
+          console.log(`[SlotService] Queue Parse Error, resetting: ${e.message}`);
           queue = [];
         }
       }
 
-      // 3. 큐에 작업 추가 (오늘부터 40일치)
+      // 4. 큐에 작업 추가 (오늘부터 40일치)
       const now = new Date();
       now.setHours(0, 0, 0, 0);
+      const startTimeMs = now.getTime();
       
-      // 해당 지점의 기존 대기 작업이 있다면 덮어쓰기
-      queue = queue.filter(q => q.branchId !== branchId);
+      const originalLen = queue.length;
       
-      queue.push({
-        branchId: branchId,
-        startDateMs: now.getTime(),
-        daysTotal: 40,
-        daysProcessed: 0
+      branchIds.forEach(branchId => {
+        // 해당 지점의 기존 대기 작업이 있다면 제거 (중복 방지)
+        queue = queue.filter(q => q.branchId !== branchId);
+        
+        queue.push({
+          branchId: branchId,
+          startDateMs: startTimeMs,
+          daysTotal: 40,
+          daysProcessed: 0
+        });
       });
 
       props.setProperty(QUEUE_KEY, JSON.stringify(queue));
+      console.log(`[SlotService] Queue updated (Batch). Size: ${originalLen} -> ${queue.length} (${QUEUE_KEY})`);
 
-      // 4. 1회성 트리거 등록 (병렬 실행을 위해 핸들러별로 관리)
+      // 5. 트리거 갱신 (기존 것 삭제 후 신규 생성하여 실행 보장)
       const triggers = ScriptApp.getProjectTriggers();
-      const hasTrigger = triggers.some(t => t.getHandlerFunction() === HANDLER_NAME);
+      triggers.forEach(t => {
+        if (t.getHandlerFunction() === HANDLER_NAME) {
+          ScriptApp.deleteTrigger(t);
+        }
+      });
 
-      if (!hasTrigger) {
-        ScriptApp.newTrigger(HANDLER_NAME)
-          .timeBased()
-          .after(3 * 1000) 
-          .create();
-        console.log(`[SlotService] Enqueued ${isUrgent ? 'URGENT' : 'Normal'} sync for branch ${branchId}`);
-      }
+      ScriptApp.newTrigger(HANDLER_NAME)
+        .timeBased()
+        .after(3 * 1000) 
+        .create();
+      
+      console.log(`[SlotService] Batch enqueued for ${branchIds.length} branches. New trigger created: ${HANDLER_NAME}`);
+
     } catch (e) {
-      console.log(`[SlotService] Enqueue Sync Error: ${e.message}`);
+      console.log(`[SlotService] Enqueue Batch Error: ${e.message}`);
+    } finally {
+      // 6. Lock 해제
+      if (lock.hasLock()) lock.releaseLock();
     }
+  },
+
+  /**
+   * [Queue] 기본 슬롯 일괄 동기화 트리거 생성 (3초 뒤 실행)
+   * @param {string} branchId - 지점 ID
+   * @param {boolean} isUrgent - 긴급 모드 여부 (UI 수동 수정 시 true)
+   */
+  enqueueDefaultSlotSync(branchId, isUrgent = false) {
+    this.enqueueSlotSyncBatch([branchId], isUrgent);
   },
 
   /**
