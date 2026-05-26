@@ -680,7 +680,7 @@
           localDateTime.date = Util.formatDate(newRes.reservation_date, 'date');
           localDateTime.time = Util.formatDate(newRes.reservation_date, 'time');
         }
-      }, { deep: true });
+      });
 
       const handleSaveReservation = async () => {
         if (isReservationFormValid.value === false) { 
