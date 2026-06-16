@@ -175,8 +175,8 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
       depositAmount = Config.DEPOSIT.BASE_AMOUNT + (extraUnits * Config.DEPOSIT.UNIT_AMOUNT);
     }
 
-    // 59명 초과 시 에러 처리 (기존 60명에서 59명으로 기준 변경)
-    if (rawData.pax > 59) {
+    // 79명 초과 시 에러 처리 (기존 59명에서 79명으로 기준 변경)
+    if (rawData.pax > 79) {
       maxPaxOverError = true;
     }
   }
