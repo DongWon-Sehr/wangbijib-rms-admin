@@ -21,9 +21,9 @@ const Config = {
   // 3. Deposit Policy
   DEPOSIT: {
     THRESHOLD_PAX: 9,     // 예약금이 적용되는 최소 인원 (9인 이상)
-    BASE_AMOUNT: 100,  // 기본 예약금 (10 만원)
+    BASE_AMOUNT: 100,  // 기본 예약금 (100 달러)
     UNIT_PAX: 10,         // 증액 단위 인원 (10명 단위)
-    UNIT_AMOUNT: 100   // 증액 단위 금액 (10 만원)
+    UNIT_AMOUNT: 100   // 증액 단위 금액 (100 달러)
   },
 
   // 3-1. Deposit URLs
