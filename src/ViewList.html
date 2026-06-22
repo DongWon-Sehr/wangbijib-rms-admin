@@ -51,7 +51,7 @@
         </select>
         <select v-model="filterDeposit" class="border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm focus:ring-amber-500 focus:border-amber-500 cursor-pointer min-w-[120px]">
           <option value="all">💰 예약금 전체</option>
-          <option value="n/a">미대상</option>
+          <option value="n/a">⚪ N/A</option>
           <option value="pending">🟡 대기</option>
           <option value="confirm">🟢 확정</option>
           <option value="refund">🔵 환불</option>
@@ -150,7 +150,7 @@
            </select>
         <select v-model="filterDeposit" class="flex-1 border border-gray-200 rounded-lg py-2 px-2 bg-white text-xs">
               <option value="all">예약금: 전체</option>
-              <option value="n/a">미대상</option>
+              <option value="n/a">⚪ N/A</option>
               <option value="pending">🟡 대기</option>
               <option value="confirm">🟢 확정</option>
               <option value="refund">🔵 환불</option>
@@ -328,7 +328,7 @@
                  class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-amber-500"
                  :class="res.deposit_status === 'pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-100 text-green-800 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200')"
                >
-                 <option value="n/a">미대상</option>
+                 <option value="n/a">N/A</option>
                  <option value="pending">대기</option>
                  <option value="confirm">확정</option>
                  <option value="refund">환불</option>
@@ -429,7 +429,7 @@
                 class="h-7 w-20 text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center"
                 :class="res.deposit_status === 'pending' ? 'bg-amber-50 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-gray-50 text-gray-600 border-gray-100')"
               >
-                <option value="n/a">미대상</option>
+                <option value="n/a">⚪ N/A</option>
                 <option value="pending">🟡 대기</option>
                 <option value="confirm">🟢 확정</option>
                 <option value="refund">🔵 환불</option>
