@@ -250,7 +250,7 @@
         if (!branchMapKo.value) return '알 수 없음';
         return branchMapKo.value[id] || '알 수 없음';
       };
-      const getDepositStatusLabel = (s) => ({'n/a':'미대상','pending':'대기','confirm':'확정','refund':'환불'})[s] || '미대상';
+      const getDepositStatusLabel = (s) => ({'n/a':'N/A','pending':'대기','confirm':'확정','refund':'환불'})[s] || 'N/A';
       const getDepositBadgeClass = (s) => ({'n/a':'bg-gray-100 text-gray-700','pending':'bg-amber-100 text-amber-800','confirm':'bg-red-100 text-red-800','refund':'bg-blue-100 text-blue-800'})[s] || 'bg-gray-100';
       const getUserRoleBadge = (r) => ({'admin':'bg-red-700 text-white','manager':'bg-amber-100 text-amber-800','viewer':'bg-gray-200 text-gray-800'})[r] || 'bg-gray-100';
 
@@ -324,7 +324,15 @@
       });
 
       const activeCalendarId = computed(() => selectedCalendarBranchId.value === 'master' ? 'wangbijib@gmail.com' : branches.value.find(x => x.id === selectedCalendarBranchId.value)?.calendar_id);
-      const calendarIframeSrc = computed(() => CALENDAR_URL);
+      const calendarIframeSrc = computed(() => {
+        // 통합(마스터)은 모든 지점 캘린더가 합쳐진 기본 URL 사용
+        if (selectedCalendarBranchId.value === 'master') return CALENDAR_URL;
+        // 특정 지점 선택 시 해당 지점 캘린더만 임베드
+        const calId = activeCalendarId.value;
+        if (!calId) return CALENDAR_URL;
+        const params = 'ctz=Asia%2FSeoul&wkst=2&hl=ko&mode=MONTH&showPrint=0&showTz=0';
+        return 'https://calendar.google.com/calendar/embed?' + params + '&src=' + encodeURIComponent(calId);
+      });
 
       const filteredReservations = computed(() => { 
         let list = reservations.value || [];
@@ -362,7 +370,9 @@
         const o = sortOrder.value;
         list.sort((a,b) => {
           let va = a[k], vb = b[k];
-          if (k.includes('date') || k.includes('_at')) { va = va ? new Date(va).getTime() : 0; vb = vb ? new Date(vb).getTime() : 0; }
+          // 지점명 정렬: 예약 객체엔 branch_id만 있으므로 매핑된 한글 지점명으로 비교
+          if (k === 'branch_name_ko') { va = branchMapKo.value[a.branch_id] || ''; vb = branchMapKo.value[b.branch_id] || ''; }
+          else if (k.includes('date') || k.includes('_at')) { va = va ? new Date(va).getTime() : 0; vb = vb ? new Date(vb).getTime() : 0; }
           if (typeof va === 'string') va = va.toLowerCase(); if (typeof vb === 'string') vb = vb.toLowerCase();
           if (va == null) va = ''; if (vb == null) vb = '';
           if (va < vb) return -1 * o; if (va > vb) return 1 * o;
