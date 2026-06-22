@@ -51,7 +51,7 @@
         </select>
         <select v-model="filterDeposit" class="border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm focus:ring-amber-500 focus:border-amber-500 cursor-pointer min-w-[120px]">
           <option value="all">💰 예약금 전체</option>
-          <option value="n/a">미대상</option>
+          <option value="n/a">⚪ N/A</option>
           <option value="pending">🟡 대기</option>
           <option value="confirm">🟢 확정</option>
           <option value="refund">🔵 환불</option>
@@ -130,6 +130,9 @@
               <option value="reservation_date">방문 일시순</option>
               <option value="booking_request_date">요청 일시순</option>
               <option value="customer_name">고객명순</option>
+              <option value="branch_name_ko">지점순</option>
+              <option value="pax">인원순</option>
+              <option value="status">상태순</option>
               <option value="deposit_status">예약금순</option>
             </select>
         <button @click="sortOrder = sortOrder * -1" class="p-2 bg-gray-100 rounded-lg text-gray-600 border border-gray-200">
@@ -147,11 +150,40 @@
            </select>
         <select v-model="filterDeposit" class="flex-1 border border-gray-200 rounded-lg py-2 px-2 bg-white text-xs">
               <option value="all">예약금: 전체</option>
-              <option value="n/a">미대상</option>
+              <option value="n/a">⚪ N/A</option>
               <option value="pending">🟡 대기</option>
               <option value="confirm">🟢 확정</option>
               <option value="refund">🔵 환불</option>
            </select>
+      </div>
+
+      <!-- 지점 필터 -->
+      <div class="pt-3 border-t border-gray-100">
+        <div class="flex justify-between items-center mb-2">
+          <span class="text-xs font-bold text-gray-500 uppercase">지점 필터</span>
+          <button
+            @click="clearBranchFilters"
+            v-if="hasFilterBranches"
+            class="px-2 py-1 rounded-full text-[10px] font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors flex items-center"
+          >
+            <i class="ph ph-arrow-counter-clockwise mr-1"></i> 초기화
+          </button>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="branch in branches"
+            :key="branch.id"
+            @click="toggleBranchFilter(branch.id)"
+            :class="{
+              'bg-red-700 text-white shadow-md ring-2 ring-red-200': isBranchSelected(branch.id),
+              'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-gray-300': !isBranchSelected(branch.id)
+            }"
+            class="px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 flex items-center"
+          >
+            <i v-if="isBranchSelected(branch.id)" class="ph-check-bold mr-1"></i>
+            {{ branch.branch_name_ko }}
+          </button>
+        </div>
       </div>
     </div>
   </details>
@@ -296,7 +328,7 @@
                  class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-amber-500"
                  :class="res.deposit_status === 'pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-100 text-green-800 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200')"
                >
-                 <option value="n/a">미대상</option>
+                 <option value="n/a">N/A</option>
                  <option value="pending">대기</option>
                  <option value="confirm">확정</option>
                  <option value="refund">환불</option>
@@ -397,7 +429,7 @@
                 class="h-7 w-20 text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center"
                 :class="res.deposit_status === 'pending' ? 'bg-amber-50 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-gray-50 text-gray-600 border-gray-100')"
               >
-                <option value="n/a">미대상</option>
+                <option value="n/a">⚪ N/A</option>
                 <option value="pending">🟡 대기</option>
                 <option value="confirm">🟢 확정</option>
                 <option value="refund">🔵 환불</option>

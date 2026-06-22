@@ -180,6 +180,7 @@
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">현재 예약금 상태</label>
                 <select v-model="activeReservation.deposit_status" class="w-full border border-amber-300 rounded-lg p-3 bg-white focus:ring-amber-500 focus:border-amber-500">
+                  <option value="n/a">N/A</option>
                   <option value="pending">대기 (Pending)</option>
                   <option value="confirm">확정 (Confirm)</option>
                   <option value="refund">환불 (Refund)</option>

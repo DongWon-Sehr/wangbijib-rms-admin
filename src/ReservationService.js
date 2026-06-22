@@ -200,6 +200,15 @@ const ReservationService = {
         this.syncCalendarAndSlot(currentRow, updatedRow, headers, changes);
       }
 
+      // 7. Gmail 라벨 동기화 (상태/예약금 상태 변경 시)
+      //    - 모달 저장(updateReservation)과 리스트 인라인 변경(updateReservationStatus/updateDepositStatus)이
+      //      모두 이 경로를 거치므로 라벨 처리를 여기서 일원화함
+      const threadId = updatedRow[headers.indexOf('email_thread_id')];
+      if (threadId) {
+        if (changes.status) this._syncReservationLabel(threadId, updatedRow[headers.indexOf('status')]);
+        if (changes.deposit_status) this._syncDepositLabel(threadId, updatedRow[headers.indexOf('deposit_status')]);
+      }
+
       return Util.createResponse(true);
 
     } catch (e) {
@@ -218,25 +227,10 @@ const ReservationService = {
         throw new Error(`newStatus (${newStatus}) is invalid`);
       }
 
-      // update Google Sheet
+      // update Google Sheet (Gmail 예약 라벨 동기화는 updateReservation 내부에서 일원화 처리됨)
       const reservationUpdate = this.updateReservation(id, { status: newStatus });
       if (!reservationUpdate.success) {
         throw new Error('Fail to update sheet');
-      }
-
-      const reservation = this.getReservationById(id);
-      if (newStatus === Config.RESERVATION_STATUS.CANCEL) {
-        // update Gmail Label
-        const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.CANCEL);
-        if (!labelUpdate) {
-          console.log(`[ReservationService] updateReservationStatus Warn: Reservation Label 업데이트 실패`);
-        }
-      } else if (newStatus === Config.RESERVATION_STATUS.CONFIRM) {
-        const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.CONFIRM);
-        if (!labelUpdate) console.log(`[ReservationService] Warn: Reservation Label 업데이트 실패`);
-      } else if (newStatus === Config.RESERVATION_STATUS.PENDING) {
-        const labelUpdate = GmailService.updateReservationLabel(reservation.email_thread_id, GmailService.RESERVATION_LABELS.PENDING);
-        if (!labelUpdate) console.log(`[ReservationService] Warn: Reservation Label 업데이트 실패`);
       }
 
       return Util.createResponse(true);
@@ -256,34 +250,10 @@ const ReservationService = {
         throw new Error(`newStatus (${newStatus}) is invalid (must be one of ${"'" + Object.values(this.DEPOSIT_STATUS).join("', '") + "'"})`);
       }
 
-      // update Google Sheet
+      // update Google Sheet (Gmail 예약금 라벨 동기화는 updateReservation 내부에서 일원화 처리됨)
       const reservationUpdate = this.updateReservation(id, { deposit_status : newStatus });
       if (!reservationUpdate.success) {
         throw new Error('Fail to update sheet');
-      }
-
-      const reservation = this.getReservationById(id);
-      if (newStatus === this.DEPOSIT_STATUS.NA) {
-        // update Gmail Label
-        const labelUpdate = GmailService.deleteDepositLabel(reservation.email_thread_id);
-        if (!labelUpdate) {
-          console.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 삭제 실패`);
-        }
-      } else if (newStatus === this.DEPOSIT_STATUS.PENDING) {
-        const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.PENDING);
-        if (!labelUpdate) {
-          console.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.PENDING})`);
-        }
-      } else if (newStatus === this.DEPOSIT_STATUS.CONFIRM) {
-        const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.CONFIRM);
-        if (!labelUpdate) {
-          console.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.CONFIRM})`);
-        }
-      } else if (newStatus === this.DEPOSIT_STATUS.REFUND) {
-        const labelUpdate = GmailService.updateDepositLabel(reservation.email_thread_id, GmailService.DEPOSIT_LABELS.REFUND);
-        if (!labelUpdate) {
-          console.log(`[ReservationService] updateDepositStatus Warn: Deposit Label 업데이트 실패 (${GmailService.DEPOSIT_LABELS.REFUND})`);
-        }
       }
 
       return Util.createResponse(true);
@@ -313,6 +283,42 @@ const ReservationService = {
       console.log(`[ReservationService] updateMessageSentAt Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);
     }
+  },
+
+  /**
+   * [Helper] 예약 상태에 따른 Gmail 예약 라벨 동기화
+   * - updateReservation / updateReservationStatus 양쪽에서 공용으로 사용
+   */
+  _syncReservationLabel(threadId, status) {
+    if (!threadId) return;
+    let labelName = null;
+    if (status === Config.RESERVATION_STATUS.CANCEL) labelName = GmailService.RESERVATION_LABELS.CANCEL;
+    else if (status === Config.RESERVATION_STATUS.CONFIRM) labelName = GmailService.RESERVATION_LABELS.CONFIRM;
+    else if (status === Config.RESERVATION_STATUS.PENDING) labelName = GmailService.RESERVATION_LABELS.PENDING;
+
+    if (labelName) {
+      const ok = GmailService.updateReservationLabel(threadId, labelName);
+      if (!ok) console.log(`[ReservationService] Warn: Reservation Label 업데이트 실패 (${labelName})`);
+    }
+  },
+
+  /**
+   * [Helper] 예약금 상태에 따른 Gmail 예약금 라벨 동기화
+   * - updateReservation / updateDepositStatus 양쪽에서 공용으로 사용
+   */
+  _syncDepositLabel(threadId, depositStatus) {
+    if (!threadId) return;
+    let ok = true;
+    if (depositStatus === this.DEPOSIT_STATUS.NA) {
+      ok = GmailService.deleteDepositLabel(threadId);
+    } else if (depositStatus === this.DEPOSIT_STATUS.PENDING) {
+      ok = GmailService.updateDepositLabel(threadId, GmailService.DEPOSIT_LABELS.PENDING);
+    } else if (depositStatus === this.DEPOSIT_STATUS.CONFIRM) {
+      ok = GmailService.updateDepositLabel(threadId, GmailService.DEPOSIT_LABELS.CONFIRM);
+    } else if (depositStatus === this.DEPOSIT_STATUS.REFUND) {
+      ok = GmailService.updateDepositLabel(threadId, GmailService.DEPOSIT_LABELS.REFUND);
+    }
+    if (!ok) console.log(`[ReservationService] Warn: Deposit Label 업데이트 실패 (${depositStatus})`);
   },
 
   /**
