@@ -74,6 +74,8 @@
       const BASE_WEBAPP_URL = appElement ? appElement.dataset.appUrl : '';
       
       const isProfileDropdownOpen = ref(false);
+      const isNotificationOpen = ref(false);
+      const isMutating = ref(false);
       const isMobileMenuOpen = ref(false);
       const logoutUrl = 'https://accounts.google.com/logout';
       const CALENDAR_URL = "https://calendar.google.com/calendar/embed?&wkst=2&ctz=Asia%2FSeoul&hl=ko&title=%EC%99%95%EB%B9%84%EC%A7%91%20%EC%98%88%EC%95%BD%20%EC%BA%98%EB%A6%B0%EB%8D%94&showPrint=0&showTz=0&src=MmZiMTNkYzIyMDczM2Y3Y2U2MWJhMmFiMjM2NmY1YjQ3OWFhMmQyYjhkN2EzNGE3NzZlZWE3YzQyMDcxMjhkY0Bncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=ZDE4YTZhMTMyNDhkOWE1MTI2N2M4OTgyZTcwNjE3NGI3MDI4YjVjNmFhOGU3NGE5NDUzZDNjOGQ1OWYyOTI1YUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=ZTZkMzY3NjQ3ZGU5ZTQzODUyYTBlNjE3OTljYmU4N2FjYmMwZjRmYjdhMmJmMTFlMzMyY2RiZTg3NTU1MDZkNEBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=OTkxODFlMzc5YjdmZTBkMzY5NjJjODc5MzcyODQ1ZTBkMDBjMmU4YmE4ZWM4ZjNmYTQzZjZhMThkZWVlYjVhYUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=YmE5NmExOGRjZWVjNzZiODcwZWIzYWY5OWM2NjUwOTJmNzA1MGY3M2FlMWM2NDJjZmRmYWVmYmNiYjMzNmYxOUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=YTM4MGRjNTBmMjEyN2RlMmI5MzlmODcxNTU4MzUzMTZjNWQxMDBkNTk4MmZkMTEzZmM3NTI4ZWZhNzlhOGJkMUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&color=%23ef6c00&color=%237cb342&color=%238e24aa&color=%239e69af&color=%23ef6c00&color=%23c0ca33";
@@ -273,6 +275,86 @@
       // ============================================================
       const branchMapKo = computed(() => branches.value.reduce((m, b) => { m[b.id] = b.branch_name_ko; return m; }, {}));
       const branchMapEn = computed(() => branches.value.reduce((m, b) => { m[b.id] = b.branch_name_en; return m; }, {}));
+      
+      const notifications = computed(() => {
+        const list = [];
+        const now = new Date();
+        const nowMs = now.getTime();
+
+        (reservations.value || []).forEach(res => {
+          if (res.status === 'cancel') return;
+          
+          const resTime = new Date(res.reservation_date);
+          if (isNaN(resTime.getTime())) return;
+          const resMs = resTime.getTime();
+
+          // 1. [대기] 미래 대기 예약 건
+          if (resMs > nowMs && res.status === 'pending') {
+            list.push({
+              id: res.id + '_pending',
+              type: 'pending',
+              title: '확정 대기 중',
+              desc: `${res.customer_name} ${res.pax}명 | ${getBranchName(res.branch_id)}`,
+              timeText: Util.formatDate(resTime, 'datetime'),
+              sortTime: resMs,
+              reservation: res
+            });
+          }
+
+          // 2. [예약금] 미래 예약금 입금 대기 건
+          if (resMs > nowMs && res.deposit_status === 'pending') {
+            list.push({
+              id: res.id + '_deposit',
+              type: 'deposit',
+              title: '입금 대기 중',
+              desc: `${res.customer_name} ${res.pax}명 | ${getBranchName(res.branch_id)}`,
+              timeText: Util.formatDate(resTime, 'datetime'),
+              sortTime: resMs,
+              reservation: res
+            });
+          }
+
+          // 3. [임박] 6시간 이내 임박 건
+          const diffMs = resMs - nowMs;
+          if (diffMs >= 0 && diffMs <= 6 * 60 * 60 * 1000) {
+            const diffMin = Math.round(diffMs / 60000);
+            let leftTimeText = '';
+            if (diffMin < 60) {
+              leftTimeText = `${diffMin}분 남음`;
+            } else {
+              leftTimeText = `${Math.floor(diffMin / 60)}시간 ${diffMin % 60}분 남음`;
+            }
+            list.push({
+              id: res.id + '_imminent',
+              type: 'imminent',
+              title: '방문 임박',
+              desc: `${res.customer_name} ${res.pax}명 | ${getBranchName(res.branch_id)}`,
+              timeText: `${Util.formatDate(resTime, 'time')} (${leftTimeText})`,
+              sortTime: resMs,
+              reservation: res
+            });
+          }
+
+          // 4. [환불] 이용기간이 경과했으나 예약금이 완료(confirm) 상태인 건
+          if (resMs < nowMs && res.deposit_status === 'confirm') {
+            list.push({
+              id: res.id + '_refund',
+              type: 'refund',
+              title: '환불 필요',
+              desc: `${res.customer_name} ${res.pax}명 | ${getBranchName(res.branch_id)}`,
+              timeText: Util.formatDate(resTime, 'datetime'),
+              sortTime: resMs,
+              reservation: res
+            });
+          }
+        });
+
+        // 가까운 방문 예약 시간 순 정렬
+        list.sort((a, b) => a.sortTime - b.sortTime);
+        return list;
+      });
+
+      const notificationCount = computed(() => notifications.value.length);
       
       const slotDefaultsMap = computed(() => {
         const map = {};
@@ -477,7 +559,19 @@
       const setCurrentView = (n) => currentView.value = n;
       const setCurrentViewAndCloseMenu = (n) => { currentView.value = n; isMobileMenuOpen.value = false; };
       const toggleProfileDropdown = (e) => { e.stopPropagation(); isProfileDropdownOpen.value = !isProfileDropdownOpen.value; };
+      const toggleNotificationDropdown = (e) => {
+        e.stopPropagation();
+        isNotificationOpen.value = !isNotificationOpen.value;
+        if (isNotificationOpen.value) {
+          isProfileDropdownOpen.value = false;
+        }
+      };
       const toggleMobileMenu = () => { isMobileMenuOpen.value = !isMobileMenuOpen.value; };
+      
+      const handleNotificationClick = (noti) => {
+        isNotificationOpen.value = false;
+        openModal('reservation', noti.reservation);
+      };
 
       const sortBy = (k) => { if (sortKey.value === k) sortOrder.value *= -1; else { sortKey.value = k; sortOrder.value = 1; } };
       const toggleBranchFilter = (id) => { const idx = filterBranchIds.value.indexOf(id); if (idx > -1) filterBranchIds.value.splice(idx, 1); else filterBranchIds.value.push(id); };
@@ -509,22 +603,33 @@
         
         if (await showCustomConfirm('상태 변경', confirmMsg)) {
           let payloadValue = newValue;
+          isMutating.value = true; // 뮤테이션 시작
 
-          let r;
-          if (field === 'status') {
-            r = await runGoogleScript('apiUpdateReservationStatus', res.id, payloadValue);
-          } else if (field === 'deposit_status') {
-            r = await runGoogleScript('apiUpdateDepositStatus', res.id, payloadValue);
+          try {
+            let r;
+            if (field === 'status') {
+              r = await runGoogleScript('apiUpdateReservationStatus', res.id, payloadValue);
+            } else if (field === 'deposit_status') {
+              r = await runGoogleScript('apiUpdateDepositStatus', res.id, payloadValue);
+            }
+            
+            if (r && r.success) {
+              res[field] = payloadValue;
+              showCustomAlert('성공', '변경되었습니다.');
+            } else {
+              showCustomAlert('오류', (r && r.message) || '요청이 실패했습니다.');
+              await refreshInitialData(true);
+            }
+          } catch (err) {
+            console.error('[Mutation Error] inline status change fail:', err);
+            showCustomAlert('오류', '네트워크 통신 중 에러가 발생했습니다: ' + err.message);
+            await refreshInitialData(true);
+          } finally {
+            isMutating.value = false; // 뮤테이션 종료
           }
-          
-          if (r.success) {
-            res[field] = payloadValue;
-            showCustomAlert('성공', '변경되었습니다.');
-          } else {
-            showCustomAlert('오류', r.message);
-            refreshInitialData(true);
-          }
-        } else { refreshInitialData(true); }
+        } else { 
+          await refreshInitialData(true); 
+        }
       };
 
       const generateKakaoMessageData = (res) => {
@@ -616,6 +721,7 @@
 
         if (await showCustomConfirm("확인", "발송 완료 처리하시겠습니까?")) {
           if (modalState.reservation) isModalLoading.value = true;
+          isMutating.value = true; // 뮤테이션 시작
           try {
             const response = await runGoogleScriptSilent('apiUpdateReservationMessageSentAt', res.id);
             if (response.success) { 
@@ -633,7 +739,10 @@
             } 
             else showCustomAlert("실패", response.message);
           } catch (e) { showCustomAlert("오류", e.message); }
-          finally { if (modalState.reservation) isModalLoading.value = false; }
+          finally { 
+            if (modalState.reservation) isModalLoading.value = false; 
+            isMutating.value = false; // 뮤테이션 종료
+          }
         }
       };
       const confirmDelete = async () => {
@@ -696,13 +805,14 @@
         if (isReservationFormValid.value === false) { 
           showCustomAlert("확인", isSelectionInvalid.value ? "시간대 마감" : "입력값 확인"); return; 
         }
-
+ 
         isModalLoading.value = true;
+        isMutating.value = true; // 뮤테이션 시작
         const d = activeReservation.value;
         const payload = createUpdatePayload(d);
         payload.visit_date = localDateTime.date;
         payload.visit_time = localDateTime.time;
-
+ 
         try {
           const res = await runGoogleScriptSilent('apiUpdateReservation', payload);
           if (res.success) { 
@@ -719,7 +829,10 @@
           } 
           else showCustomAlert("오류", res.message);
         } catch (e) { showCustomAlert("오류", e.message); }
-        finally { isModalLoading.value = false; }
+        finally { 
+          isModalLoading.value = false; 
+          isMutating.value = false; // 뮤테이션 종료
+        }
       };
       
       const sendCustomMail = async () => {
@@ -1109,7 +1222,7 @@
           });
           
           setInterval(async () => {
-            if (appState.value !== 'authorized' || modalState.system || modalState.mail) return;
+            if (appState.value !== 'authorized' || modalState.system || modalState.mail || isMutating.value) return;
             if (isSyncing.value) return;
             
             syncCountdown.value--;
@@ -1135,13 +1248,13 @@
         } catch(e) { console.error(e); alert('초기화 오류: ' + e.message); } finally { if(appState.value !== 'initializing') isLoading.value = false; }
       };
 
-      onMounted(() => { initApp(); document.addEventListener('click', () => isProfileDropdownOpen.value = false); });
+      onMounted(() => { initApp(); document.addEventListener('click', () => { isProfileDropdownOpen.value = false; isNotificationOpen.value = false; }); });
 
       return {
         pullDistance, isPulling, isRefreshing, handleTouchStart, handleTouchMove, handleTouchEnd,
         pullThresholdReached, pullIndicatorHeight, hasMultiplePages, isGroupReservation,
         isLoading, loadingMessage, appState, deniedMessage, currentView, currentUser, isModalLoading, syncCountdown, isSyncing,
-        isProfileDropdownOpen, isMobileMenuOpen, logoutUrl, modalState, alertModal,
+        isProfileDropdownOpen, isNotificationOpen, isMutating, isMobileMenuOpen, logoutUrl, modalState, alertModal,
         activeReservation, activeSystemData,
         reservations, branches, users, mailTemplates, slotMasters, slotDefaults, slotOverrides,
         filterText, filterStatus, filterDeposit, filterBranchIds, filterDateType, filterDateStart, filterDateEnd,
@@ -1149,7 +1262,8 @@
         settingsTab, currentSlotDate, selectedSlotBranchId, selectedCalendarBranchId,
         filteredReservations, paginatedReservations, totalPage, branchMapKo, branchMapEn, slotSettingsBranches, filteredSlotBranches,
         activeCalendarId, calendarIframeSrc, slotMasterMap,
-        setCurrentView, setCurrentViewAndCloseMenu, toggleProfileDropdown, toggleMobileMenu, 
+        notifications, notificationCount,
+        setCurrentView, setCurrentViewAndCloseMenu, toggleProfileDropdown, toggleNotificationDropdown, toggleMobileMenu, 
         runGoogleScript, openModal, closeModal, showCustomAlert, showCustomConfirm, handleAlertResult,
         refreshInitialData, handleManualRefresh, formatDate: Util.formatDate,
         getBranchName, getDepositStatusLabel, getDepositBadgeClass, sortBy, toggleBranchFilter, isBranchSelected, clearBranchFilters,
@@ -1163,6 +1277,7 @@
         openBranchModal: (data) => openModal('system', { type: 'branch', mode: 'edit', data }),
         openSlotEditModal,
         openSlotBatchModal, 
+        handleNotificationClick,
         // [MODIFIED] Added create mode support (null arg)
         openMailTemplateModal: (t = null) => openModal('mail', { type: 'mail', mode: t ? 'edit' : 'create', data: t }),
         localDateTime, selectedMailTemplateId, localData, userBranchIds, slotBatchPayload, localMailData, availableKeywords, modalTitle, 
