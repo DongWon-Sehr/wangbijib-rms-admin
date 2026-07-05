@@ -84,25 +84,25 @@
                 <!-- Icon by Type -->
                 <div class="flex-shrink-0 mt-0.5">
                   <div
-                    v-if="noti.type === 'pending'"
+                    v-if="noti.primaryType === 'pending'"
                     class="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100"
                   >
                     <i class="ph ph-clock text-lg"></i>
                   </div>
                   <div
-                    v-else-if="noti.type === 'deposit'"
+                    v-else-if="noti.primaryType === 'deposit'"
                     class="w-8 h-8 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center border border-orange-100"
                   >
                     <i class="ph ph-credit-card text-lg"></i>
                   </div>
                   <div
-                    v-else-if="noti.type === 'imminent'"
+                    v-else-if="noti.primaryType === 'imminent'"
                     class="w-8 h-8 rounded-full bg-red-50 text-red-600 flex items-center justify-center border border-red-100"
                   >
                     <i class="ph ph-timer text-lg"></i>
                   </div>
                   <div
-                    v-else-if="noti.type === 'refund'"
+                    v-else-if="noti.primaryType === 'refund'"
                     class="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100"
                   >
                     <i class="ph ph-hand-coins text-lg"></i>
@@ -113,17 +113,29 @@
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-1.5 mb-1 flex-wrap">
                     <span
-                      class="noti-badge"
-                      :class="{
-                        'noti-badge-pending': noti.type === 'pending',
-                        'noti-badge-deposit': noti.type === 'deposit',
-                        'noti-badge-imminent': noti.type === 'imminent',
-                        'noti-badge-refund': noti.type === 'refund'
-                      }"
+                      v-if="noti.types.includes('imminent')"
+                      class="noti-badge noti-badge-imminent"
                     >
-                      {{ noti.type === 'pending' ? '예약' : (noti.type === 'deposit' || noti.type === 'refund') ? '예약금' : '임박' }}
+                      임박
                     </span>
-                    <span class="text-xs font-bold text-gray-800">{{ noti.title }}</span>
+                    <span
+                      v-if="noti.types.includes('pending')"
+                      class="noti-badge noti-badge-pending"
+                    >
+                      예약대기
+                    </span>
+                    <span
+                      v-if="noti.types.includes('deposit')"
+                      class="noti-badge noti-badge-deposit"
+                    >
+                      예약금대기
+                    </span>
+                    <span
+                      v-if="noti.types.includes('refund')"
+                      class="noti-badge noti-badge-refund"
+                    >
+                      환불필요
+                    </span>
                   </div>
                   <p class="text-xs text-gray-600 font-medium truncate mb-0.5">{{ noti.desc }}</p>
                   <p class="text-[10px] text-gray-400 flex items-center gap-1">
