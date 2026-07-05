@@ -20,7 +20,7 @@
       .apiLoginWithGoogle(idToken);
   };
 
-  const { createApp, ref, computed, onMounted, reactive, toRefs, watch, nextTick, getCurrentInstance } = Vue;
+  const { createApp, ref, computed, onMounted, onUnmounted, reactive, toRefs, watch, nextTick, getCurrentInstance } = Vue;
 
   // --- Client-side Utilities ---
   const Util = {
@@ -77,6 +77,7 @@
       const isNotificationOpen = ref(false);
       const isMutating = ref(false);
       const isMobileMenuOpen = ref(false);
+      const now = ref(new Date());
       const logoutUrl = 'https://accounts.google.com/logout';
       const CALENDAR_URL = "https://calendar.google.com/calendar/embed?&wkst=2&ctz=Asia%2FSeoul&hl=ko&title=%EC%99%95%EB%B9%84%EC%A7%91%20%EC%98%88%EC%95%BD%20%EC%BA%98%EB%A6%B0%EB%8D%94&showPrint=0&showTz=0&src=MmZiMTNkYzIyMDczM2Y3Y2U2MWJhMmFiMjM2NmY1YjQ3OWFhMmQyYjhkN2EzNGE3NzZlZWE3YzQyMDcxMjhkY0Bncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=ZDE4YTZhMTMyNDhkOWE1MTI2N2M4OTgyZTcwNjE3NGI3MDI4YjVjNmFhOGU3NGE5NDUzZDNjOGQ1OWYyOTI1YUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=ZTZkMzY3NjQ3ZGU5ZTQzODUyYTBlNjE3OTljYmU4N2FjYmMwZjRmYjdhMmJmMTFlMzMyY2RiZTg3NTU1MDZkNEBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=OTkxODFlMzc5YjdmZTBkMzY5NjJjODc5MzcyODQ1ZTBkMDBjMmU4YmE4ZWM4ZjNmYTQzZjZhMThkZWVlYjVhYUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=YmE5NmExOGRjZWVjNzZiODcwZWIzYWY5OWM2NjUwOTJmNzA1MGY3M2FlMWM2NDJjZmRmYWVmYmNiYjMzNmYxOUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=YTM4MGRjNTBmMjEyN2RlMmI5MzlmODcxNTU4MzUzMTZjNWQxMDBkNTk4MmZkMTEzZmM3NTI4ZWZhNzlhOGJkMUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&color=%23ef6c00&color=%237cb342&color=%238e24aa&color=%239e69af&color=%23ef6c00&color=%23c0ca33";
 
@@ -278,8 +279,7 @@
       
       const notifications = computed(() => {
         const list = [];
-        const now = new Date();
-        const nowMs = now.getTime();
+        const nowMs = now.value.getTime();
 
         (reservations.value || []).forEach(res => {
           if (res.status === 'cancel') return;
@@ -288,61 +288,59 @@
           if (isNaN(resTime.getTime())) return;
           const resMs = resTime.getTime();
 
+          const types = [];
+
           // 1. [대기] 미래 대기 예약 건
           if (resMs > nowMs && res.status === 'pending') {
-            list.push({
-              id: res.id + '_pending',
-              type: 'pending',
-              title: '확정 대기 중',
-              desc: `${res.customer_name} ${res.pax}명 | ${getBranchName(res.branch_id)}`,
-              timeText: Util.formatDate(resTime, 'datetime'),
-              sortTime: resMs,
-              reservation: res
-            });
+            types.push('pending');
           }
 
           // 2. [예약금] 미래 예약금 입금 대기 건
           if (resMs > nowMs && res.deposit_status === 'pending') {
-            list.push({
-              id: res.id + '_deposit',
-              type: 'deposit',
-              title: '입금 대기 중',
-              desc: `${res.customer_name} ${res.pax}명 | ${getBranchName(res.branch_id)}`,
-              timeText: Util.formatDate(resTime, 'datetime'),
-              sortTime: resMs,
-              reservation: res
-            });
+            types.push('deposit');
           }
 
           // 3. [임박] 6시간 이내 임박 건
           const diffMs = resMs - nowMs;
-          if (diffMs >= 0 && diffMs <= 6 * 60 * 60 * 1000) {
+          let leftTimeText = '';
+          if (res.status === 'pending' && diffMs >= 0 && diffMs <= 6 * 60 * 60 * 1000) {
+            types.push('imminent');
             const diffMin = Math.round(diffMs / 60000);
-            let leftTimeText = '';
             if (diffMin < 60) {
               leftTimeText = `${diffMin}분 남음`;
             } else {
               leftTimeText = `${Math.floor(diffMin / 60)}시간 ${diffMin % 60}분 남음`;
             }
-            list.push({
-              id: res.id + '_imminent',
-              type: 'imminent',
-              title: '방문 임박',
-              desc: `${res.customer_name} ${res.pax}명 | ${getBranchName(res.branch_id)}`,
-              timeText: `${Util.formatDate(resTime, 'time')} (${leftTimeText})`,
-              sortTime: resMs,
-              reservation: res
-            });
           }
 
           // 4. [환불] 이용기간이 경과했으나 예약금이 완료(confirm) 상태인 건
           if (resMs < nowMs && res.deposit_status === 'confirm') {
+            types.push('refund');
+          }
+
+          if (types.length > 0) {
+            let primaryType = 'refund';
+            if (types.includes('imminent')) {
+              primaryType = 'imminent';
+            } else if (types.includes('pending')) {
+              primaryType = 'pending';
+            } else if (types.includes('deposit')) {
+              primaryType = 'deposit';
+            }
+
+            let timeText = '';
+            if (types.includes('imminent')) {
+              timeText = `${Util.formatDate(resTime, 'time')} (${leftTimeText})`;
+            } else {
+              timeText = Util.formatDate(resTime, 'datetime');
+            }
+
             list.push({
-              id: res.id + '_refund',
-              type: 'refund',
-              title: '환불 필요',
+              id: res.id,
+              types: types,
+              primaryType: primaryType,
               desc: `${res.customer_name} ${res.pax}명 | ${getBranchName(res.branch_id)}`,
-              timeText: Util.formatDate(resTime, 'datetime'),
+              timeText: timeText,
               sortTime: resMs,
               reservation: res
             });
@@ -1248,7 +1246,23 @@
         } catch(e) { console.error(e); alert('초기화 오류: ' + e.message); } finally { if(appState.value !== 'initializing') isLoading.value = false; }
       };
 
-      onMounted(() => { initApp(); document.addEventListener('click', () => { isProfileDropdownOpen.value = false; isNotificationOpen.value = false; }); });
+      let clockInterval = null;
+      onMounted(() => {
+        initApp();
+        document.addEventListener('click', () => {
+          isProfileDropdownOpen.value = false;
+          isNotificationOpen.value = false;
+        });
+        clockInterval = setInterval(() => {
+          now.value = new Date();
+        }, 60000);
+      });
+
+      onUnmounted(() => {
+        if (clockInterval) {
+          clearInterval(clockInterval);
+        }
+      });
 
       return {
         pullDistance, isPulling, isRefreshing, handleTouchStart, handleTouchMove, handleTouchEnd,
