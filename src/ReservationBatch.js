@@ -155,7 +155,7 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
     customerName: row[idx.NAME],
     email: row[idx.EMAIL],
     phoneNumber: row[idx.PHONE],
-    notes: row[idx.NOTES] || '',
+    notes: Util.collapseBlankLines(row[idx.NOTES] || ''),
     pax: Number(row[idx.PAX]),
     bookingRequestDate: row[idx.REQ_DATE]
   };

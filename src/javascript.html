@@ -52,6 +52,10 @@
       if (!str) return '';
       return String(str).charAt(index);
     },
+    collapseBlankLines: function(text) {
+      if (typeof text !== 'string') return text;
+      return text.replace(/\r\n?/g, '\n').replace(/(?:[ \t]*\n){2,}/g, '\n').trim();
+    },
     base64EncodeWebSafe: function(str) {
       return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
@@ -149,7 +153,6 @@
       const pullIndicatorHeight = computed(() => isRefreshing.value ? '60px' : Math.min(pullDistance.value, 100) + 'px');
       
       const hasMultiplePages = computed(() => totalPage.value > 1);
-      const isGroupReservation = computed(() => (activeReservation.value?.pax || 0) >= 9);
       const hasFilterBranches = computed(() => filterBranchIds.value.length > 0);
       
       const isSlotFull = (branchId, masterId, date) => {
@@ -261,8 +264,8 @@
         id: res.id,
         branch_id: res.branch_id,
         customer_name: res.customer_name,
-        pax: res.pax, email: res.email, notes: res.notes,
-        internal_notes: res.internal_notes,
+        pax: res.pax, email: res.email, notes: Util.collapseBlankLines(res.notes),
+        internal_notes: Util.collapseBlankLines(res.internal_notes),
         deposit_status: res.deposit_status,
         deposit_amount: res.deposit_amount,
         status: res.status,
@@ -647,10 +650,11 @@
           body += '- 방문일: ' + dateStr + '\n';
           body += '- 이름: ' + res.customer_name + '\n';
           body += '- 인원: ' + res.pax + '\n';
-          if (res.notes) body += '- 고객메모: ' + res.notes + '\n';
-          if (res.internal_notes) body += '- 관리자메모: ' + res.internal_notes + '\n';
+          if (res.notes) body += '- 고객메모:\n' + res.notes + '\n';
+          if (res.internal_notes) body += '- 관리자메모:\n' + res.internal_notes + '\n';
           body += '- 이메일: ' + res.email + '\n';
           body += '\n- 예약ID: ' + res.id + '\n';
+          body = body.trim();
           let link = 'https://calendar.google.com/calendar/';
           if (res.calendar_id && res.event_id) {
             const eventIdPrefix = res.event_id.split('@')[0];
@@ -684,7 +688,7 @@
         const isMobile = window.innerWidth < 768;
         try {
           if (isMobile && navigator.share) {
-            await navigator.share({ title: kData.title, text: shareText });
+            await navigator.share({ text: shareText });
           } else {
             console.log(`[sendKaKao] Desktop mode`);
             await Kakao.Share.sendDefault({
@@ -816,6 +820,8 @@
           if (res.success) { 
             const newDateIso = new Date(payload.visit_date + ' ' + payload.visit_time).toISOString();
             activeReservation.value.reservation_date = newDateIso;
+            activeReservation.value.notes = payload.notes;
+            activeReservation.value.internal_notes = payload.internal_notes;
             const targetIdx = reservations.value.findIndex(r => r.id === d.id);
             if (targetIdx > -1) {
               const target = reservations.value[targetIdx];
@@ -1266,7 +1272,7 @@
 
       return {
         pullDistance, isPulling, isRefreshing, handleTouchStart, handleTouchMove, handleTouchEnd,
-        pullThresholdReached, pullIndicatorHeight, hasMultiplePages, isGroupReservation,
+        pullThresholdReached, pullIndicatorHeight, hasMultiplePages,
         isLoading, loadingMessage, appState, deniedMessage, currentView, currentUser, isModalLoading, syncCountdown, isSyncing,
         isProfileDropdownOpen, isNotificationOpen, isMutating, isMobileMenuOpen, logoutUrl, modalState, alertModal,
         activeReservation, activeSystemData,

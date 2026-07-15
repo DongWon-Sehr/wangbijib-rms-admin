@@ -78,6 +78,16 @@ const Util = {
   },
 
   /**
+   * 연속된 여러 줄바꿈(빈 줄 포함)을 단일 줄바꿈으로 축소하고 앞뒤 공백/줄바꿈 제거
+   * @param {string} text
+   * @returns {string}
+   */
+  collapseBlankLines(text) {
+    if (typeof text !== 'string') return text;
+    return text.replace(/\r\n?/g, '\n').replace(/(?:[ \t]*\n){2,}/g, '\n').trim();
+  },
+
+  /**
    * 날짜 포맷팅 헬퍼
    * @param {Date|string} value - Date 객체 또는 날짜 문자열
    * @param {string} type - 'datetime' | 'date' | 'time'
