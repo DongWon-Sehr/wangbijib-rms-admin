@@ -1,0 +1,8 @@
+# 저장소는 항상 LF(맥/Unix 기준)로 정규화.
+# Windows에서 clasp pull로 CRLF가 들어와도 커밋 시 LF로 저장됨.
+* text=auto eol=lf
+
+# GAS/clasp 관련 소스 파일은 명시적으로 LF 강제
+*.js   text eol=lf
+*.html text eol=lf
+*.json text eol=lf
