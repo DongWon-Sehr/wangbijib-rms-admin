@@ -107,6 +107,34 @@ function repairMissingThreadIds() {
 
         // 2. 지메일 라벨 동기화 (발송 전이라도 라벨을 붙여둠)
         GmailService.updateReservationLabel(foundId, GmailService.RESERVATION_LABELS.PENDING);
+
+        // 3. 첫 배치에서 누락된 예약금 안내 메일 재발송 (80인 이상은 URL 없어 제외)
+        const pax = Number(res.pax);
+        if (res.deposit_status === Config.DEPOSIT_STATUS.PENDING && pax <= 79) {
+          const reservationDate = new Date(res.reservation_date);
+          const mailData = {
+            customer_name: res.customer_name,
+            branch_name_en: BranchService.getBranchNameEn(res.branch_id),
+            reservation_date: reservationDate,
+            reservation_time: Util.formatDate(reservationDate, 'time'),
+            pax: pax,
+            notes: res.notes,
+            deposit_amount: res.deposit_amount
+          };
+
+          const mailResult = GmailService.replyToThreadWithTemplate(
+            foundId,
+            Config.MAIL_TEMPLATES.DEPOSIT_PENDING,
+            mailData
+          );
+
+          if (mailResult.success) {
+            console.log(`[Batch] (Repair) Deposit mail sent to ${res.customer_name} (${res.id})`);
+            GmailService.updateDepositLabel(foundId, GmailService.DEPOSIT_LABELS.PENDING);
+          } else {
+            console.log(`[Batch] (Repair) Deposit mail skipped for ${res.id}: ${mailResult.message}`);
+          }
+        }
       }
     });
 
