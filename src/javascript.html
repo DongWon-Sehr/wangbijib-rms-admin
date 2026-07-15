@@ -52,6 +52,10 @@
       if (!str) return '';
       return String(str).charAt(index);
     },
+    collapseBlankLines: function(text) {
+      if (typeof text !== 'string') return text;
+      return text.replace(/\r\n?/g, '\n').replace(/(?:[ \t]*\n){2,}/g, '\n').trim();
+    },
     base64EncodeWebSafe: function(str) {
       return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
@@ -260,8 +264,8 @@
         id: res.id,
         branch_id: res.branch_id,
         customer_name: res.customer_name,
-        pax: res.pax, email: res.email, notes: res.notes,
-        internal_notes: res.internal_notes,
+        pax: res.pax, email: res.email, notes: Util.collapseBlankLines(res.notes),
+        internal_notes: Util.collapseBlankLines(res.internal_notes),
         deposit_status: res.deposit_status,
         deposit_amount: res.deposit_amount,
         status: res.status,
@@ -816,6 +820,8 @@
           if (res.success) { 
             const newDateIso = new Date(payload.visit_date + ' ' + payload.visit_time).toISOString();
             activeReservation.value.reservation_date = newDateIso;
+            activeReservation.value.notes = payload.notes;
+            activeReservation.value.internal_notes = payload.internal_notes;
             const targetIdx = reservations.value.findIndex(r => r.id === d.id);
             if (targetIdx > -1) {
               const target = reservations.value[targetIdx];
