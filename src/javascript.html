@@ -149,7 +149,6 @@
       const pullIndicatorHeight = computed(() => isRefreshing.value ? '60px' : Math.min(pullDistance.value, 100) + 'px');
       
       const hasMultiplePages = computed(() => totalPage.value > 1);
-      const isGroupReservation = computed(() => (activeReservation.value?.pax || 0) >= 9);
       const hasFilterBranches = computed(() => filterBranchIds.value.length > 0);
       
       const isSlotFull = (branchId, masterId, date) => {
@@ -1267,7 +1266,7 @@
 
       return {
         pullDistance, isPulling, isRefreshing, handleTouchStart, handleTouchMove, handleTouchEnd,
-        pullThresholdReached, pullIndicatorHeight, hasMultiplePages, isGroupReservation,
+        pullThresholdReached, pullIndicatorHeight, hasMultiplePages,
         isLoading, loadingMessage, appState, deniedMessage, currentView, currentUser, isModalLoading, syncCountdown, isSyncing,
         isProfileDropdownOpen, isNotificationOpen, isMutating, isMobileMenuOpen, logoutUrl, modalState, alertModal,
         activeReservation, activeSystemData,
