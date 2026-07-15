@@ -647,10 +647,11 @@
           body += '- 방문일: ' + dateStr + '\n';
           body += '- 이름: ' + res.customer_name + '\n';
           body += '- 인원: ' + res.pax + '\n';
-          if (res.notes) body += '- 고객메모: ' + res.notes + '\n';
-          if (res.internal_notes) body += '- 관리자메모: ' + res.internal_notes + '\n';
+          if (res.notes) body += '- 고객메모:\n' + res.notes + '\n';
+          if (res.internal_notes) body += '- 관리자메모:\n' + res.internal_notes + '\n';
           body += '- 이메일: ' + res.email + '\n';
           body += '\n- 예약ID: ' + res.id + '\n';
+          body = body.trim();
           let link = 'https://calendar.google.com/calendar/';
           if (res.calendar_id && res.event_id) {
             const eventIdPrefix = res.event_id.split('@')[0];
@@ -684,7 +685,7 @@
         const isMobile = window.innerWidth < 768;
         try {
           if (isMobile && navigator.share) {
-            await navigator.share({ title: kData.title, text: shareText });
+            await navigator.share({ text: shareText });
           } else {
             console.log(`[sendKaKao] Desktop mode`);
             await Kakao.Share.sendDefault({

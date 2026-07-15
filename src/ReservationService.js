@@ -158,6 +158,10 @@ const ReservationService = {
           safeValue = String(rawValue) === 'true' || rawValue === true;
         } else if (schemaDef.type === 'string') {
           safeValue = String(rawValue);
+          // 노트/내부노트는 연속 줄바꿈을 단일 줄바꿈으로 축소
+          if (dbKey === 'notes' || dbKey === 'internal_notes') {
+            safeValue = Util.collapseBlankLines(safeValue);
+          }
         } else if (schemaDef.type === 'date') {
           if (!(rawValue instanceof Date)) safeValue = new Date(rawValue);
           if (isNaN(safeValue.getTime())) return; // 유효하지 않은 날짜 스킵
