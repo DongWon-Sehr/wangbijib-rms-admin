@@ -62,6 +62,113 @@ const convertTo24H = (timeStr) => {
   return `${hours.toString().padStart(2, '0')}:${minutes}`;
 };
 
+// 2026-2027 대한민국 공휴일 및 대체공휴일 목록 (YYYY-MM-DD)
+const HOLIDAYS = [
+  // 2026년 공휴일
+  '2026-01-01', '2026-02-16', '2026-02-17', '2026-02-18', '2026-03-01', '2026-03-02',
+  '2026-05-01', '2026-05-05', '2026-05-24', '2026-05-25', '2026-06-03', '2026-06-06',
+  '2026-07-17', '2026-08-15', '2026-08-17', '2026-09-24', '2026-09-25', '2026-09-26',
+  '2026-10-03', '2026-10-05', '2026-10-09', '2026-12-25',
+  
+  // 2027년 공휴일
+  '2027-01-01', '2027-02-06', '2027-02-07', '2027-02-08', '2027-02-09', '2027-03-01',
+  '2027-05-01', '2027-05-05', '2027-05-13', '2027-06-06', '2027-07-17', '2027-07-19',
+  '2027-08-15', '2027-08-16', '2027-09-14', '2027-09-15', '2027-09-16', '2027-10-03',
+  '2027-10-04', '2027-10-09', '2027-10-11', '2027-12-25', '2027-12-27'
+];
+
+const parseDateString = (str) => {
+  if (!str) return null;
+  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const fullMonths = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  
+  const strLower = str.toLowerCase();
+  
+  let month = -1;
+  for (let i = 0; i < 12; i++) {
+    if (strLower.includes(fullMonths[i]) || strLower.includes(months[i])) {
+      month = i;
+      break;
+    }
+  }
+  
+  const dayMatch = strLower.match(/\b\d{1,2}\b/);
+  const day = dayMatch ? parseInt(dayMatch[0], 10) : null;
+  
+  if (month !== -1 && day !== null) {
+    return { month, day };
+  }
+  return null;
+};
+
+const getSelectedDate = () => {
+  // 1. 캐러셀 상단 헤더의 날짜 텍스트 파싱 (가장 정확함, 예: "Sunday, July 19")
+  const currentDayEl = document.querySelector('.es-current-day-content');
+  if (currentDayEl) {
+    const parsed = parseDateString(currentDayEl.textContent);
+    if (parsed) {
+      const today = new Date();
+      const currentYear = today.getFullYear();
+      const currentMonth = today.getMonth();
+      let year = currentYear;
+      if (parsed.month < currentMonth) {
+        year = currentYear + 1;
+      }
+      return new Date(year, parsed.month, parsed.day);
+    }
+  }
+
+  // 2. Fallback: 캐러셀에서 선택된 날짜 버튼 파싱
+  const selectedDayEl = document.querySelector('.es-datetime-picker-button-selected.es-days-carousel-day');
+  if (!selectedDayEl) return null;
+
+  const weekdayEl = selectedDayEl.querySelector('.es-days-carousel-weekday');
+  const weekdayText = weekdayEl ? weekdayEl.textContent.trim() : '';
+
+  if (weekdayText === 'Today') {
+    return new Date();
+  }
+
+  const dateEl = selectedDayEl.querySelector('.es-days-carousel-date');
+  const dayText = dateEl ? dateEl.textContent.trim() : selectedDayEl.textContent;
+  const dayMatch = dayText.match(/\b\d{1,2}\b/);
+  if (!dayMatch) return null;
+  const day = parseInt(dayMatch[0], 10);
+
+  // 컨테이너 전체 텍스트에서 월 탐색
+  const container = selectedDayEl.closest('.es-content-container') || document.body;
+  const containerParsed = parseDateString(container.textContent);
+  let month = containerParsed ? containerParsed.month : -1;
+
+  if (month === -1) {
+    month = new Date().getMonth();
+  }
+
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+  let year = currentYear;
+  if (month < currentMonth) {
+    year = currentYear + 1;
+  }
+
+  return new Date(year, month, day);
+};
+
+const formatDate = (date) => {
+  if (!date) return "";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const isHoliday = (date) => {
+  if (!date) return false;
+  const formatted = formatDate(date);
+  return HOLIDAYS.includes(formatted);
+};
+
 /* =========================
    [기능 5] 규칙 기반 시간대 슬롯 관리 (Break Time & Opening Hours)
    ========================= */
@@ -75,7 +182,13 @@ const setupTimeSlotDisabler = () => {
 
   const weekdayText = selectedDayEl.querySelector('.es-days-carousel-weekday').textContent.trim();
   const dayMap = { 'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6, 'Today': new Date().getDay() };
-  const currentDay = dayMap[weekdayText];
+  let currentDay = dayMap[weekdayText];
+
+  // 선택된 날짜가 공휴일인 경우 가상 일요일(0)로 취급하여 주말 규칙 적용
+  const selectedDate = getSelectedDate();
+  if (selectedDate && isHoliday(selectedDate)) {
+    currentDay = 0;
+  }
 
   const timeButtons = document.querySelectorAll('.es-time-slot-picker-time-container');
 
