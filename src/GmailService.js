@@ -90,9 +90,17 @@ const GmailService = {
         '</body>' +
         '</html>';
 
-      targetMessage.reply('', {
-        htmlBody: htmlBody
-      });
+      const isDummyThread = targetMessage.getFrom().indexOf(this.SYSTEM_EMAIL_ADDRESS) !== -1;
+
+      if (isDummyThread) {
+        targetMessage.replyAll('', {
+          htmlBody: htmlBody
+        });
+      } else {
+        targetMessage.reply('', {
+          htmlBody: htmlBody
+        });
+      }
       console.log(`[Gmail] Sent reply to ${threadId} using ${templateId}`);
 
       return Util.createResponse(true);
@@ -421,11 +429,10 @@ const GmailService = {
         </div>
       `;
 
-      // 고객에게 직접 발송하여 Inbox에 스레드를 생성 (Admin 참조 및 고객 Reply-To 설정)
+      // 고객에게 직접 발송하여 Inbox에 스레드를 생성 (Admin 참조)
       const draft = GmailApp.createDraft(data.email, subject, '', { 
         htmlBody: htmlBody,
-        cc: this.SYSTEM_EMAIL_ADDRESS,
-        replyTo: data.email
+        cc: this.SYSTEM_EMAIL_ADDRESS
       });
       const message = draft.send();
       return message.getThread().getId();
