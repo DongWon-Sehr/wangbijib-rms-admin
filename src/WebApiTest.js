@@ -1,16 +1,3 @@
-function testAddUser() {
-  let userData = {
-    id: 'jongno_manager',
-    username: '종로점 관리자',
-    password: 'jongno',
-    role: 'manager',
-    enabled: true,
-  };
-
-  result = addUser(userData);
-  console.log('result: ', result);
-}
-
 
 function testGetDropdownData() {
   const dropdownData = getDropdownData();
