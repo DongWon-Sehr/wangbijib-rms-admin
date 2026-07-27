@@ -52,20 +52,9 @@ const GmailService = {
       if (!thread) throw new Error('Thread not found');
 
       const messages = thread.getMessages();
-      let targetMessage = messages[0]; // 기본값: 첫 메시지
+      const targetMessage = messages[0];
+      const lastMsg = messages[messages.length - 1];
 
-      // 뒤에서부터 탐색하여 '내'가 보내지 않은(즉, 고객이 보낸) 가장 최신 메시지를 찾습니다.
-      for (let i = messages.length - 1; i >= 0; i--) {
-        // from에 내 이메일이 포함되지 않은 경우 -> 고객 메시지로 간주
-        if (messages[i].getFrom().indexOf(this.SYSTEM_EMAIL_ADDRESS) === -1) {
-          targetMessage = messages[i];
-          break;
-        }
-      }
-
-      const lastMsg = messages[messages.length - 1]; // 스레드의 마지막 메일
-
-      // Gmail 스타일의 인용구 HTML 생성
       const quoteHtml =
         '<div class="gmail_quote">' +
           '<div dir="ltr" class="gmail_attr">On ' + lastMsg.getDate() + ', ' + lastMsg.getFrom() + ' wrote:<br></div>' +
@@ -74,16 +63,13 @@ const GmailService = {
           '</blockquote>' +
         '</div>';
 
-      // 1. 템플릿 로드 (DB에서 조회)
       let templateHtml = MailTemplateService.getTemplateHtmlById(templateId);
 
-      // 빈 내용 체크 (발송 중단)
       if (!templateHtml || templateHtml.trim() === '') {
         console.log(`[Gmail] 템플릿(${templateId}) 내용이 비어있어 발송 중단.`);
         return Util.createResponse(false, null, 'Template is empty');
       }
 
-      // 2. 예약어 치환
       templateHtml = this.replacePlaceholders(templateHtml, data);
       templateHtml = this._encodeEmojisToEntities(templateHtml);
       
@@ -93,29 +79,20 @@ const GmailService = {
         '<head>' +
           '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">' +
             '<style>' +
-              'body { font-family: sans-serif; line-height: 1.2; margin: 0; padding: 0; }' + // line-height 조절
-              'div, p { margin: 0; padding: 0; }' + // div와 p의 기본 여백 제거
+              'body { font-family: sans-serif; line-height: 1.2; margin: 0; padding: 0; }' +
+              'div, p { margin: 0; padding: 0; }' +
             '</style>' +
         '</head>' +
         '<body>' +
-          '<div>' + templateHtml + '</div>' + // 내 답장 내용
-          '<br clear="all">' +                // 줄바꿈 및 클리어
-          '<div>' + quoteHtml + '</div>' +     // 인용구 (이전 메일)
+          '<div>' + templateHtml + '</div>' +
+          '<br clear="all">' +
+          '<div>' + quoteHtml + '</div>' +
         '</body>' +
         '</html>';
 
-      // 만약 고객이 보낸 메시지가 없다면(예: 내가 먼저 보낸 메일), 가장 첫 번째 메일에 답장
-      if (!targetMessage) {
-        targetMessage = messages[0];
-        targetMessage.replyAll('', {
-          htmlBody: htmlBody
-        });
-      } else {
-        // 답장 발송 (고객에게만 전송되도록 reply() 사용, 필요시 replyAll() 사용 가능)
-        targetMessage.reply('', {
-          htmlBody: htmlBody
-        });
-      }
+      targetMessage.reply('', {
+        htmlBody: htmlBody
+      });
       console.log(`[Gmail] Sent reply to ${threadId} using ${templateId}`);
 
       return Util.createResponse(true);
@@ -444,10 +421,11 @@ const GmailService = {
         </div>
       `;
 
-      // 고객에게 직접 발송하여 Inbox에 스레드를 생성 (Admin 참조)
+      // 고객에게 직접 발송하여 Inbox에 스레드를 생성 (Admin 참조 및 고객 Reply-To 설정)
       const draft = GmailApp.createDraft(data.email, subject, '', { 
         htmlBody: htmlBody,
-        cc: this.SYSTEM_EMAIL_ADDRESS
+        cc: this.SYSTEM_EMAIL_ADDRESS,
+        replyTo: data.email
       });
       const message = draft.send();
       return message.getThread().getId();
