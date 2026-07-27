@@ -53,15 +53,6 @@ const GmailService = {
 
       const messages = thread.getMessages();
       const targetMessage = messages[0];
-      const lastMsg = messages[messages.length - 1];
-
-      const quoteHtml =
-        '<div class="gmail_quote">' +
-          '<div dir="ltr" class="gmail_attr">On ' + lastMsg.getDate() + ', ' + lastMsg.getFrom() + ' wrote:<br></div>' +
-          '<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">' +
-            lastMsg.getBody() +
-          '</blockquote>' +
-        '</div>';
 
       let templateHtml = MailTemplateService.getTemplateHtmlById(templateId);
 
@@ -85,8 +76,6 @@ const GmailService = {
         '</head>' +
         '<body>' +
           '<div>' + templateHtml + '</div>' +
-          '<br clear="all">' +
-          '<div>' + quoteHtml + '</div>' +
         '</body>' +
         '</html>';
 
