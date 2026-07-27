@@ -455,5 +455,21 @@ const GmailService = {
       console.log(`[GmailService] createDummyElfsightThread Error: ${e.message}`);
       throw e;
     }
+  },
+
+  /**
+   * [Async Helper] 메일 발송 직후 분리된 API 호출을 통해 지연 후 라벨 추가
+   */
+  addLabelsAfterDelay(threadId, pax) {
+    // Gmail API가 스레드를 완전히 인덱싱할 시간을 확보 (1.5초 대기)
+    Utilities.sleep(1500);
+    try {
+      this.updateReservationLabel(threadId, this.RESERVATION_LABELS.PENDING);
+      if (parseInt(pax, 10) >= 9) {
+        this.updateDepositLabel(threadId, this.DEPOSIT_LABELS.PENDING);
+      }
+    } catch (e) {
+      console.warn(`[GmailService] 라벨 추가 실패 (threadId: ${threadId}): ${e.message}`);
+    }
   }
 };

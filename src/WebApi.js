@@ -279,6 +279,16 @@ function apiInitializeMailThread(payload) {
 }
 
 /**
+ * [Async Helper] 백그라운드 라벨 추가 (클라이언트 응답 지연 방지)
+ */
+function apiAddLabelsToThread(payload) {
+  return _executeApi('apiAddLabelsToThread', () => {
+    GmailService.addLabelsAfterDelay(payload.threadId, payload.pax);
+    return true;
+  }, payload);
+}
+
+/**
  * [NEW] 예약 읽음 처리
  */
 function apiMarkReservationAsRead(id) {

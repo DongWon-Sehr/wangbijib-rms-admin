@@ -884,6 +884,11 @@
                 reservations.value[targetIdx].email_thread_id = res.data.threadId;
               }
               showCustomAlert("성공", "새 스레드가 생성되었으며 고객에게 메일이 발송되었습니다."); 
+              // [Async] 서버 측에서 클라이언트 응답을 지연시키지 않기 위해 라벨 추가는 성공 응답 직후 별도 백그라운드 호출
+              runGoogleScriptSilent('apiAddLabelsToThread', {
+                threadId: res.data.threadId,
+                pax: activeReservation.value.pax
+              }).catch(e => console.warn("Background label addition failed:", e));
             } 
             else showCustomAlert("실패", res.message);
           } catch (e) { showCustomAlert("오류", e.message); }
