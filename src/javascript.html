@@ -1261,6 +1261,13 @@
               try {
                 const res = await runGoogleScriptSilent('apiGetReservations'); 
                 if (res.success) {
+                  // [Fix] 동기화 시 로컬에서 이미 읽음(is_read=true) 처리된 상태라면 서버의 과거 데이터(false)를 무시하고 로컬 상태 유지
+                  res.data.forEach(serverRes => {
+                    const localRes = reservations.value.find(r => r.id === serverRes.id);
+                    if (localRes && localRes.is_read === true) {
+                      serverRes.is_read = true;
+                    }
+                  });
                   reservations.value = res.data;
                   
                   // [Sync] 모달이 열려있는 경우 해당 예약의 정보(threadId 등)를 업데이트
