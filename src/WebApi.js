@@ -262,6 +262,23 @@ function apiSendTemplatedMail(payload) {
 }
 
 /**
+ * [NEW] 예약 확정 이메일 더미 발송 (Elfsight 누락 대비) 및 스레드 초기화
+ */
+function apiInitializeMailThread(payload) {
+  return _executeApi('apiInitializeMailThread', () => {
+    const { reservationId, data } = payload;
+    
+    // 1. 고객에게 직접 더미 메일(예약 확정 내역) 발송 및 스레드 생성
+    const threadId = GmailService.createDummyElfsightThread(data);
+    
+    // 2. 시트에 스레드 ID 저장
+    ReservationService.updateReservation(reservationId, { email_thread_id: threadId });
+    
+    return { threadId: threadId };
+  }, payload);
+}
+
+/**
  * [NEW] 예약 읽음 처리
  */
 function apiMarkReservationAsRead(id) {

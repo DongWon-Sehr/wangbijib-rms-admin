@@ -865,6 +865,32 @@
         }
       };
 
+      const initializeMailThread = async () => {
+        if (await showCustomConfirm("신규 스레드 생성", "고객에게 예약 확정 내역을 발송하고 새로운 메일 스레드를 생성하시겠습니까?")) {
+          try {
+            isModalLoading.value = true;
+            const payload = {
+              reservationId: activeReservation.value.id,
+              data: {
+                ...activeReservation.value,
+                branch_name_en: branchMapEn.value[activeReservation.value.branch_id]
+              }
+            };
+            const res = await runGoogleScriptSilent('apiInitializeMailThread', payload);
+            if (res.success) { 
+              activeReservation.value.email_thread_id = res.data.threadId;
+              const targetIdx = reservations.value.findIndex(r => r.id === activeReservation.value.id);
+              if (targetIdx > -1) {
+                reservations.value[targetIdx].email_thread_id = res.data.threadId;
+              }
+              showCustomAlert("성공", "새 스레드가 생성되었으며 고객에게 메일이 발송되었습니다."); 
+            } 
+            else showCustomAlert("실패", res.message);
+          } catch (e) { showCustomAlert("오류", e.message); }
+          finally { isModalLoading.value = false; }
+        }
+      };
+
       // ============================================================
       // [MODIFIED] Summernote Integration (Badge & Auto-Detect)
       // ============================================================
@@ -1302,7 +1328,7 @@
         openMailTemplateModal: (t = null) => openModal('mail', { type: 'mail', mode: t ? 'edit' : 'create', data: t }),
         localDateTime, selectedMailTemplateId, localData, userBranchIds, slotBatchPayload, localMailData, availableKeywords, modalTitle, 
         isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid,
-        handleSaveReservation, sendCustomMail, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder, 
+        handleSaveReservation, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder, 
         renderPreview, isPreviewMode, togglePreview,
         BASE_WEBAPP_URL
       };
