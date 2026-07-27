@@ -104,8 +104,18 @@ const GmailService = {
         '</body>' +
         '</html>';
 
-      // 4. 답장 발송
-      targetMessage.reply('', { htmlBody: htmlBody });
+      // 만약 고객이 보낸 메시지가 없다면(예: 내가 먼저 보낸 메일), 가장 첫 번째 메일에 답장
+      if (!targetMessage) {
+        targetMessage = messages[0];
+        targetMessage.replyAll('', {
+          htmlBody: htmlBody
+        });
+      } else {
+        // 답장 발송 (고객에게만 전송되도록 reply() 사용, 필요시 replyAll() 사용 가능)
+        targetMessage.reply('', {
+          htmlBody: htmlBody
+        });
+      }
       console.log(`[Gmail] Sent reply to ${threadId} using ${templateId}`);
 
       return Util.createResponse(true);
@@ -382,5 +392,68 @@ const GmailService = {
     const mm = ('0' + (date.getMonth() + 1)).slice(-2);
     const dd = ('0' + date.getDate()).slice(-2);
     return `${yyyy}/${mm}/${dd}`;
+  },
+
+  /**
+   * [추가] 신규 스레드 생성을 위한 Elfsight 더미 메일 발송
+   * - 예약 확정 메일을 보내기 위해 시스템(Admin) 자신에게 이메일을 발송하여 스레드를 생성합니다.
+   * - 고객 이메일을 Reply-To로 지정하여 이 스레드에 답장 시 고객에게 전송되도록 합니다.
+   */
+  createDummyElfsightThread(data) {
+    try {
+      const branchName = data.branch_name_en || 'Wangbijib Branch';
+      const dateObj = new Date(data.reservation_date);
+      const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      const month = monthNames[dateObj.getMonth()];
+      const day = dateObj.getDate();
+      const year = dateObj.getFullYear();
+      let hours = dateObj.getHours();
+      const minutes = (dateObj.getMinutes() + '').padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      const timeStr = `${hours}:${minutes} ${ampm}`;
+      const dateStr = `${month} ${day}, ${year}`;
+      
+      const subject = `New Booking: ${branchName} on ${dateStr} at ${timeStr} - ${data.customer_name}`;
+      
+      const htmlBody = `
+        <div style="font-family: sans-serif; line-height: 1.5; color: #333;">
+          <h2 style="color: #000; margin-bottom: 5px;">You have a new booking at Wangbijib</h2>
+          <p style="margin-top: 0; margin-bottom: 20px;">We are pleased to inform you that a new booking has been made.<br>
+          Google Map: <a href="https://maps.app.goo.gl/9zqTx8u2ueY4ARwE7">https://maps.app.goo.gl/9zqTx8u2ueY4ARwE7</a></p>
+          
+          <h3 style="color: #000; margin-bottom: 5px;">Booking details</h3>
+          <p style="margin-top: 0; margin-bottom: 20px;"><strong>What:</strong> ${branchName}<br>
+          <strong>When:</strong> ${month} ${day}, ${timeStr}</p>
+          
+          <h3 style="color: #000; margin-bottom: 5px;">Client information</h3>
+          <p style="margin-top: 0; margin-bottom: 20px;"><strong>Name:</strong> ${data.customer_name}<br>
+          <strong>Email:</strong> <a href="mailto:${data.email}">${data.email}</a><br>
+          <strong>Phone:</strong> ${data.phone_number || ''}<br>
+          <strong>Notes:</strong> ${data.notes || ''}<br>
+          <strong>Number of Guest (Pax):</strong> ${data.pax}</p>
+          
+          <p style="margin-bottom: 20px;"><strong>I understand that I have to arrive within 10 minutes of my reserved start time, and that arriving later may result in cancellation of my reservation.</strong><br>
+          Yes</p>
+          
+          <p style="color: #666; font-size: 0.9em; margin-bottom: 20px;">Please make sure to review the booking details and prepare accordingly. If you have any questions or need to make changes to the booking, please contact the client directly at the provided contact information.</p>
+          
+          <p style="color: #d9534f; font-weight: bold; margin-top: 20px;">
+            &#128591; Please note that if you do not arrive within 10 minutes of your reservation start time, your reservation may be automatically cancelled.
+          </p>
+        </div>
+      `;
+
+      // 고객에게 직접 발송하여 Inbox에 스레드를 생성 (Admin 참조)
+      const draft = GmailApp.createDraft(data.email, subject, '', { 
+        htmlBody: htmlBody,
+        cc: this.SYSTEM_EMAIL_ADDRESS
+      });
+      const message = draft.send();
+      return message.getThread().getId();
+    } catch (e) {
+      console.log(`[GmailService] createDummyElfsightThread Error: ${e.message}`);
+      throw e;
+    }
   }
 };
