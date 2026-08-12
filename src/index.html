@@ -9,6 +9,29 @@
 
   <!-- 1. Libraries -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // 브랜드 프라이머리 팔레트: BI Copper #C16E36 기반 (여기만 바꾸면 GNB/버튼/타이틀 등 전체 테마 일괄 변경)
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              50: '#fdf6f0',
+              100: '#f9e8db',
+              200: '#f2d0b5',
+              300: '#e8b28a',
+              400: '#db9260',
+              500: '#cf7d45',
+              600: '#c16e36',
+              700: '#a1572b',
+              800: '#824627',
+              900: '#6a3a22'
+            }
+          }
+        }
+      }
+    };
+  </script>
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
   <!-- Summernote Lite CDN (Bootstrap 의존성 없는 버전) -->
@@ -37,12 +60,12 @@
 
 <body class="bg-gray-100 text-gray-800 font-sans text-sm h-screen overflow-hidden">
 
-  <div id="app" class="h-full flex flex-col relative" data-app-url="<?!= BASE_WEBAPP_URL ?>" data-app-version="<?!= APP_VERSION ?>" v-cloak>
+  <div id="app" class="h-full flex flex-col relative" data-app-url="<?!= BASE_WEBAPP_URL ?>" data-app-version="<?!= APP_VERSION ?>" data-app-logo="<?!= APP_LOGO ?>" v-cloak>
 
     <!-- A. Global Spinner (반투명 오버레이: 뒤 화면이 비쳐 보이도록 처리) -->
     <div v-if="isLoading"
       class="absolute inset-0 z-[9999] bg-white/60 backdrop-blur-[2px] flex flex-col items-center justify-center">
-      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-red-800 mb-4"></div>
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-800 mb-4"></div>
       <p class="text-lg font-bold text-gray-700 animate-pulse">{{ loadingMessage }}</p>
     </div>
 
