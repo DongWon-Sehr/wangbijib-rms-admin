@@ -11,17 +11,29 @@
        <p class="text-sm font-bold text-gray-700">저장 중...</p>
   </div>
 
-  <div class="p-6 overflow-y-auto">
-    <!-- Header -->
-    <div class="flex justify-between items-center border-b pb-4 mb-4">
-      <h2 class="text-2xl font-bold text-primary-800">
-        {{ modalTitle }}
-      </h2>
-      <button @click="closeModal('system')" class="text-gray-400 hover:text-gray-600">
+  <!-- Header (Fixed: 타이틀 + 저장/닫기) -->
+  <div class="p-4 md:p-5 border-b flex-shrink-0 flex justify-between items-center bg-white z-10">
+    <h2 class="text-xl md:text-2xl font-bold text-primary-800">
+      {{ modalTitle }}
+    </h2>
+    <div class="flex items-center space-x-2">
+      <button
+        type="button"
+        @click="handleSystemSave"
+        :disabled="!isSystemDirty"
+        :class="isSystemDirty ? 'bg-primary-800 hover:bg-primary-900' : 'bg-gray-400 opacity-50 cursor-not-allowed'"
+        class="px-4 py-2 text-white rounded-lg font-bold transition shadow-sm flex items-center"
+        :title="isSystemDirty ? '변경사항 저장' : '변경사항 없음'"
+      >
+        <i class="ph ph-floppy-disk mr-1.5"></i>{{ activeSystemData.mode === 'create' ? '등록' : '저장' }}
+      </button>
+      <button @click="closeModal('system')" class="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition">
         <i class="ph ph-x text-2xl"></i>
       </button>
     </div>
+  </div>
 
+  <div class="p-4 md:p-6 flex-1 overflow-y-auto custom-scrollbar">
     <!-- Content: Dynamic Form -->
     <form @submit.prevent="handleSystemSave">
       <div class="space-y-6">
@@ -108,7 +120,14 @@
               <label class="block text-sm font-medium text-gray-700 mb-1">지점 캘린더 ID</label>
               <input type="text" v-model="localData.calendar_id" class="w-full border rounded-lg p-3" required>
             </div>
-            <!-- [FIX] Location Field Removed -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">주소 (Address)</label>
+              <input type="text" v-model="localData.address" class="w-full border rounded-lg p-3" placeholder="예: 30 Eulji-ro, Jung-gu, Seoul">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">구글맵 링크 (Google Map Link)</label>
+              <input type="text" v-model="localData.google_map_link" class="w-full border rounded-lg p-3" placeholder="https://maps.app.goo.gl/...">
+            </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">지점 상태</label>
               <select v-model="localData.enabled" class="w-full border rounded-lg p-3">
@@ -195,6 +214,17 @@
                     class="px-3 py-1.5 bg-gray-600 text-white rounded text-xs hover:bg-gray-700"
                  >적용</button>
              </div>
+             <!-- 시간대 마감 프리셋 -->
+             <div class="flex flex-wrap gap-2 mb-3">
+               <button type="button" @click="applySlotBatchPreset('lunch')"
+                 class="px-3 py-1.5 text-xs font-bold rounded-lg border border-primary-300 text-primary-700 bg-primary-50 hover:bg-primary-100 transition">
+                 <i class="ph ph-sun-horizon mr-1"></i>점심 시간대 마감 (17시 이전 0/ON)
+               </button>
+               <button type="button" @click="applySlotBatchPreset('afternoon')"
+                 class="px-3 py-1.5 text-xs font-bold rounded-lg border border-primary-300 text-primary-700 bg-primary-50 hover:bg-primary-100 transition">
+                 <i class="ph ph-moon-stars mr-1"></i>오후 시간대 마감 (17시 이후 0/ON)
+               </button>
+             </div>
             <table class="min-w-full divide-y divide-gray-200">
               <thead class="bg-gray-50">
                 <tr>
@@ -228,22 +258,6 @@
 
       </div>
 
-      <!-- Footer: Save/Close Buttons -->
-      <div class="flex justify-end space-x-3 border-t pt-4 mt-6">
-        <button
-          type="button"
-          @click="closeModal('system')"
-          class="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
-        >
-          닫기
-        </button>
-        <button
-          type="submit"
-          class="px-5 py-2 bg-primary-800 text-white rounded-lg hover:bg-primary-900 transition font-semibold"
-        >
-          {{ activeSystemData.mode === 'create' ? '등록' : '저장' }}
-        </button>
-      </div>
     </form>
 
     <!-- Delete Button (Edit Mode Only - User) -->

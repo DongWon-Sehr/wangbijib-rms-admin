@@ -50,7 +50,8 @@ const BranchService = {
           
           if (branchData.branch_name_ko) row[headers.indexOf('branch_name_ko')] = branchData.branch_name_ko;
           if (branchData.branch_name_en) row[headers.indexOf('branch_name_en')] = branchData.branch_name_en;
-          if (branchData.location) row[headers.indexOf('location')] = branchData.location;
+          if (branchData.address !== undefined && headers.indexOf('address') > -1) row[headers.indexOf('address')] = branchData.address;
+          if (branchData.google_map_link !== undefined && headers.indexOf('google_map_link') > -1) row[headers.indexOf('google_map_link')] = branchData.google_map_link;
           if (branchData.calendar_id) row[headers.indexOf('calendar_id')] = branchData.calendar_id;
           if (branchData.enabled !== undefined) row[headers.indexOf('enabled')] = branchData.enabled;
           

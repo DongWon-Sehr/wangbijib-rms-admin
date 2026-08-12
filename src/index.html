@@ -130,6 +130,23 @@
 
     </div>
 
+    <!-- Cell Hover Tooltip (truncate 풀 텍스트) -->
+    <div
+      v-if="cellTip.show"
+      class="fixed z-[10001] max-w-md bg-gray-900/90 text-white text-xs px-3 py-2 rounded-lg shadow-xl pointer-events-none break-all"
+      :style="{ left: cellTip.x + 'px', top: cellTip.y + 'px' }"
+    >{{ cellTip.text }}</div>
+
+    <!-- Center Toast (Optimistic 반영 피드백) -->
+    <transition name="toast">
+      <div v-if="toast.show" class="fixed inset-0 z-[10000] flex items-center justify-center pointer-events-none">
+        <div class="bg-gray-900/85 text-white px-5 py-3 rounded-xl shadow-2xl text-sm font-bold flex items-center gap-2">
+          <i :class="toast.type === 'success' ? 'ph-fill ph-check-circle text-green-400' : 'ph-fill ph-warning-circle text-amber-400'" class="text-xl"></i>
+          {{ toast.message }}
+        </div>
+      </div>
+    </transition>
+
     <!-- Google One Tap Configuration (Placed outside v-if chain) -->
     <div
       id="g_id_onload"
