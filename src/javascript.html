@@ -105,6 +105,29 @@
         isOpen: false, title: '', message: '', isConfirm: false, resolve: null
       });
 
+      // 셀 호버 툴팁 (truncate된 풀 텍스트 즉시 표시, fixed 렌더링이라 overflow 클리핑 없음)
+      const cellTip = reactive({ show: false, text: '', x: 0, y: 0 });
+      const showCellTip = (e, text) => {
+        if (!text) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        cellTip.text = text;
+        cellTip.x = r.left;
+        cellTip.y = r.bottom + 6;
+        cellTip.show = true;
+      };
+      const hideCellTip = () => { cellTip.show = false; };
+
+      // 화면 중앙 토스트 (optimistic 반영 피드백)
+      const toast = reactive({ show: false, message: '', type: 'success' });
+      let toastTimer = null;
+      const showToast = (message, type) => {
+        toast.message = message;
+        toast.type = type || 'success';
+        toast.show = true;
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => { toast.show = false; }, 1000);
+      };
+
       // Data Stores
       const currentUser = ref(null);
       const branches = ref([]);
@@ -210,7 +233,9 @@
         'reservation_date',
         'reservation_time',
         'deposit_amount',
-        'deposit_url'
+        'deposit_url',
+        'address',
+        'google_map_link'
       ];
       const modalTitle = ref('');
 
@@ -512,6 +537,14 @@
       });
       const isReservationFormValid = computed(() => !isTimeEmpty.value && !isSelectionInvalid.value && !isPaxInvalid.value);
 
+      // 변경사항 존재 여부 (저장 버튼 활성화 + 카톡 전송 전 저장 필요 안내 공용)
+      const isReservationDirty = computed(() => {
+        if (!activeReservation.value || !originalReservation.value) return false;
+        const cur = JSON.stringify(createUpdatePayload(activeReservation.value)) + localDateTime.date + localDateTime.time;
+        const orig = JSON.stringify(createUpdatePayload(originalReservation.value)) + Util.formatDate(originalReservation.value.reservation_date, 'date') + Util.formatDate(originalReservation.value.reservation_date, 'time');
+        return cur !== orig;
+      });
+
       // Actions
       const openModal = (type, data = null) => {
         if (data) {
@@ -620,6 +653,7 @@
         if (await showCustomConfirm('상태 변경', confirmMsg)) {
           const snapshot = res[field];
           res[field] = newValue;
+          showToast('변경되었습니다');
           isMutating.value = true;
 
           const apiName = field === 'status' ? 'apiUpdateReservationStatus' : 'apiUpdateDepositStatus';
@@ -673,14 +707,9 @@
         if (e) e.stopPropagation();
         if (!res) return;
         
-        if (modalState.reservation && originalReservation.value) {
-          const currentResString = JSON.stringify(createUpdatePayload(activeReservation.value)) + localDateTime.date + localDateTime.time;
-          const origResString = JSON.stringify(createUpdatePayload(originalReservation.value)) + Util.formatDate(originalReservation.value.reservation_date, 'date') + Util.formatDate(originalReservation.value.reservation_date, 'time');
-          
-          if (currentResString !== origResString) {
-            showCustomAlert("알림", "변경된 내용이 있습니다. 먼저 저장 버튼을 눌러 변경사항을 저장한 후 전송해주세요.");
-            return;
-          }
+        if (modalState.reservation && isReservationDirty.value) {
+          showCustomAlert("알림", "변경된 내용이 있습니다. 먼저 저장 버튼을 눌러 변경사항을 저장한 후 전송해주세요.");
+          return;
         }
         
         const kData = generateKakaoMessageData(res);
@@ -746,6 +775,7 @@
         applyTo(res);
         if (listItem && listItem !== res) applyTo(listItem);
         if (syncOriginal) applyTo(originalReservation.value);
+        showToast('발송 완료 처리되었습니다');
 
         isMutating.value = true;
         runGoogleScriptSilent('apiUpdateReservationMessageSentAt', res.id)
@@ -906,6 +936,7 @@
           target.reservation_date = newDateIso;
         }
         originalReservation.value = JSON.parse(JSON.stringify(activeReservation.value));
+        showToast('저장되었습니다');
 
         isMutating.value = true;
         runGoogleScriptSilent('apiUpdateReservation', payload)
@@ -928,6 +959,7 @@
         if (await showCustomConfirm("발송", "메일 발송하시겠습니까?")) {
           try {
             isModalLoading.value = true;
+            const branch = branches.value.find(b => b.id === activeReservation.value.branch_id) || {};
             const payload = {
               threadId: activeReservation.value.email_thread_id,
               templateId: tmpl.id,
@@ -936,7 +968,9 @@
                 branch_name_en: branchMapEn.value[activeReservation.value.branch_id],
                 pax: activeReservation.value.pax,
                 reservation_date: activeReservation.value.reservation_date,
-                deposit_amount: activeReservation.value.deposit_amount
+                deposit_amount: activeReservation.value.deposit_amount,
+                address: branch.address || '',
+                google_map_link: branch.google_map_link || ''
               }
             };
             const res = await runGoogleScriptSilent('apiSendTemplatedMail', payload);
@@ -951,11 +985,14 @@
         if (await showCustomConfirm("신규 스레드 생성", "고객에게 예약 확정 내역을 발송하고 새로운 메일 스레드를 생성하시겠습니까?")) {
           try {
             isModalLoading.value = true;
+            const branch = branches.value.find(b => b.id === activeReservation.value.branch_id) || {};
             const payload = {
               reservationId: activeReservation.value.id,
               data: {
                 ...activeReservation.value,
-                branch_name_en: branchMapEn.value[activeReservation.value.branch_id]
+                branch_name_en: branchMapEn.value[activeReservation.value.branch_id],
+                address: branch.address || '',
+                google_map_link: branch.google_map_link || ''
               }
             };
             const res = await runGoogleScriptSilent('apiInitializeMailThread', payload);
@@ -1093,10 +1130,34 @@
         }
       };
 
+      // 시스템/메일 모달 더티 체크 (저장 버튼 활성화 제어)
+      const originalSystemState = ref('');
+      const currentSystemStateString = () => {
+        const d = activeSystemData.value;
+        if (!d) return '';
+        if (d.type === 'slot' && d.mode === 'batch') return JSON.stringify(slotBatchPayload.masterSlots);
+        if (d.type === 'user') return JSON.stringify(localData.value) + JSON.stringify(userBranchIds.value.slice().sort());
+        return JSON.stringify(localData.value);
+      };
+      const isSystemDirty = computed(() => modalState.system && originalSystemState.value !== currentSystemStateString());
+
+      const normalizeMailBody = (html) => (html || '').replace(/<span class="custom-badge"[^>]*data-value="([^"]+)"[^>]*>.*?<\/span>/g, '[[$1]]');
+      const originalMailState = ref('');
+      const currentMailStateString = () => JSON.stringify({
+        n: localMailData.value.template_name || '',
+        b: normalizeMailBody(localMailData.value.body_html)
+      });
+      const isMailDirty = computed(() => modalState.mail && originalMailState.value !== currentMailStateString());
+
       // Settings Watchers & Handlers
       watch(activeSystemData, (d) => {
         if (d) { 
           localData.value = d.data ? JSON.parse(JSON.stringify(d.data)) : {};
+          if (d.type === 'branch') {
+            // 시트에 아직 컬럼이 없어 undefined인 신규 필드는 빈 문자열로 정규화 (더티 체크 오탐 방지)
+            if (localData.value.address === undefined) localData.value.address = '';
+            if (localData.value.google_map_link === undefined) localData.value.google_map_link = '';
+          }
           if (d.type === 'user') {
             userBranchIds.value = d.mode === 'create' ? [] : (d.data?.branch_ids || []);
             if(d.mode === 'create') localData.value = { id: null, user_email: '', user_name: '', role: 'manager', enabled: true, branch_ids: [] };
@@ -1130,6 +1191,11 @@
               modalTitle.value = d.mode === 'create' ? '새 메일 템플릿' : '메일 템플릿 수정';
             }
           }
+          // 더티 체크 기준 스냅샷 갱신
+          nextTick(() => {
+            originalSystemState.value = currentSystemStateString();
+            originalMailState.value = currentMailStateString();
+          });
         }
       }, { deep: true });
 
@@ -1224,6 +1290,20 @@
         }
       };
       
+      // 슬롯 일괄수정 프리셋: 기준 시각(17시) 이전/이후 시간대를 슬롯 0 / 활성화 ON으로 일괄 마감
+      const applySlotBatchPreset = (type) => {
+        slotBatchPayload.masterSlots.forEach(s => {
+          const t = slotMasterMap.value[s.id] || '';
+          const hour = parseInt(String(t).split(':')[0], 10);
+          if (isNaN(hour)) return;
+          const isAfternoon = hour >= 17;
+          if ((type === 'afternoon' && isAfternoon) || (type === 'lunch' && !isAfternoon)) {
+            s.slot = 0;
+            s.enabled = true;
+          }
+        });
+      };
+
       const openSlotBatchModal = (type) => {
         const branchId = selectedSlotBranchId.value;
         const date = currentSlotDate.value;
@@ -1303,6 +1383,7 @@
                 modalTitle.value = '메일 템플릿 수정';
               }
             }
+            originalMailState.value = currentMailStateString();
           } 
           else {
             // [MODIFIED] Show alert only on failure
@@ -1328,13 +1409,15 @@
         if (!htmlContent) return '';
         let processed = htmlContent;
         const sampleData = {
-          customer_name: 'Jone Doe',
-          branch_name_en: 'Wangbijib Myeondong Center',
+          customer_name: 'John Doe',
+          branch_name_en: 'Hansik Wangbijib Euljiro Branch',
           pax: '4',
           reservation_date: 'Jan 1',
           reservation_time: '18:30',
           deposit_amount: '100',
           deposit_url: 'https://example.deposit.url',
+          address: '21 Myeongdong 7-gil, Jung District, Seoul, South Korea',
+          google_map_link: 'https://maps.app.goo.gl/WqvmgHYLK3oDV7588',
         };
         
         // 1. [FIX] Handle existing badge spans (from Editor)
@@ -1476,12 +1559,12 @@
         openUserModal: (mode, data = null) => openModal('system', { type: 'user', mode, data }),
         openBranchModal: (data) => openModal('system', { type: 'branch', mode: 'edit', data }),
         openSlotEditModal,
-        openSlotBatchModal, 
+        openSlotBatchModal, applySlotBatchPreset,
         handleNotificationClick,
         // [MODIFIED] Added create mode support (null arg)
         openMailTemplateModal: (t = null) => openModal('mail', { type: 'mail', mode: t ? 'edit' : 'create', data: t }),
         localDateTime, selectedMailTemplateId, localData, userBranchIds, slotBatchPayload, localMailData, availableKeywords, modalTitle, 
-        isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid,
+        isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid, isReservationDirty, isSystemDirty, isMailDirty, toast, cellTip, showCellTip, hideCellTip,
         handleSaveReservation, isStatusDropdownOpen, toggleStatusDropdown, setReservationStatus, depositAmountDisplay, handleDepositAmountInput, handleDepositAmountKeydown, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder,
         renderPreview, isPreviewMode, togglePreview,
         BASE_WEBAPP_URL, appVersion, appLogo
