@@ -8,9 +8,11 @@ function doGet(e) {
     const webAppUrl = ScriptApp.getService().getUrl();
     const template = HtmlService.createTemplateFromFile('index');
     template.BASE_WEBAPP_URL = webAppUrl;
+    template.APP_VERSION = Config.APP_VERSION;
+    template.APP_LOGO = _getLogoDataUri();
 
     return template.evaluate()
-      .setTitle('왕비집 예약관리 시스템 v2.0')
+      .setTitle('왕비집 예약관리 시스템 v' + Config.APP_VERSION)
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   } catch (err) {
@@ -78,6 +80,25 @@ function apiLoginWithGoogle(idToken) {
 
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+// Drive의 BI 로고를 data URI로 반환 (실패 시 빈 문자열 → 프론트는 왕관 아이콘 폴백)
+function _getLogoDataUri() {
+  // 파일 ID를 키에 포함해 로고 교체 시 캐시가 자동 무효화되도록 함
+  const CACHE_KEY = 'APP_LOGO_' + Config.LOGO_FILE_ID;
+  try {
+    const cache = CacheService.getScriptCache();
+    const cached = cache.get(CACHE_KEY);
+    if (cached) return cached;
+
+    const blob = DriveApp.getFileById(Config.LOGO_FILE_ID).getBlob();
+    const dataUri = 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
+    if (dataUri.length < 90 * 1024) cache.put(CACHE_KEY, dataUri, 21600); // CacheService 100KB 제한 고려
+    return dataUri;
+  } catch (e) {
+    console.warn('[doGet] 로고 로드 실패: ' + e.message);
+    return '';
+  }
 }
 
 /**

@@ -6,28 +6,28 @@
     <nav class="flex space-x-2 border-b border-gray-200">
       <button 
         @click="settingsTab = 'slot'" 
-        :class="{ 'border-red-800 text-red-800 font-bold': settingsTab === 'slot', 'border-transparent text-gray-500 hover:text-gray-700': settingsTab !== 'slot' }"
+        :class="{ 'border-primary-800 text-primary-800 font-bold': settingsTab === 'slot', 'border-transparent text-gray-500 hover:text-gray-700': settingsTab !== 'slot' }"
         class="pb-2 px-4 border-b-2 transition-colors flex items-center text-sm"
       >
         <i class="ph ph-clock-counter-clockwise mr-2"></i> 슬롯 관리
       </button>
       <button 
         @click="settingsTab = 'mail'" 
-        :class="{ 'border-red-800 text-red-800 font-bold': settingsTab === 'mail', 'border-transparent text-gray-500 hover:text-gray-700': settingsTab !== 'mail' }"
+        :class="{ 'border-primary-800 text-primary-800 font-bold': settingsTab === 'mail', 'border-transparent text-gray-500 hover:text-gray-700': settingsTab !== 'mail' }"
         class="pb-2 px-4 border-b-2 transition-colors flex items-center text-sm"
       >
         <i class="ph ph-envelope-simple-open mr-2"></i> 메일 템플릿
       </button>
       <button 
         @click="settingsTab = 'branch'" 
-        :class="{ 'border-red-800 text-red-800 font-bold': settingsTab === 'branch', 'border-transparent text-gray-500 hover:text-gray-700': settingsTab !== 'branch' }"
+        :class="{ 'border-primary-800 text-primary-800 font-bold': settingsTab === 'branch', 'border-transparent text-gray-500 hover:text-gray-700': settingsTab !== 'branch' }"
         class="pb-2 px-4 border-b-2 transition-colors flex items-center text-sm"
       >
         <i class="ph ph-map-pin mr-2"></i> 지점 관리
       </button>
       <button 
         @click="settingsTab = 'user'" 
-        :class="{ 'border-red-800 text-red-800 font-bold': settingsTab === 'user', 'border-transparent text-gray-500 hover:text-gray-700': settingsTab !== 'user' }"
+        :class="{ 'border-primary-800 text-primary-800 font-bold': settingsTab === 'user', 'border-transparent text-gray-500 hover:text-gray-700': settingsTab !== 'user' }"
         class="pb-2 px-4 border-b-2 transition-colors flex items-center text-sm"
       >
         <i class="ph ph-users-three mr-2"></i> 사용자 관리
@@ -44,7 +44,7 @@
         <h2 class="text-xl font-bold text-gray-800">사용자 관리</h2>
         <button 
           @click="openUserModal('create')"
-          class="px-4 py-2 bg-red-800 text-white rounded-lg hover:bg-red-900 transition flex items-center"
+          class="px-4 py-2 bg-primary-800 text-white rounded-lg hover:bg-primary-900 transition flex items-center"
         >
           <i class="ph ph-user-plus mr-2"></i> 새 사용자 등록
         </button>
@@ -123,13 +123,13 @@
             <button @click="changeSlotDate(-1)" class="p-2 bg-gray-100 rounded-full hover:bg-gray-200">
                 <i class="ph ph-caret-left"></i>
             </button>
-            <span class="font-bold text-lg text-red-800">{{ formatDate(currentSlotDate, 'date') }}</span>
+            <span class="font-bold text-lg text-primary-800">{{ formatDate(currentSlotDate, 'date') }}</span>
             <button @click="changeSlotDate(1)" class="p-2 bg-gray-100 rounded-full hover:bg-gray-200">
                 <i class="ph ph-caret-right"></i>
             </button>
             <input type="date" v-model="currentSlotDate" class="border border-gray-300 rounded-lg p-2 text-sm">
         </div>
-        <select v-model="selectedSlotBranchId" class="border border-gray-300 rounded-lg p-2 text-sm focus:ring-red-500 focus:border-red-500">
+        <select v-model="selectedSlotBranchId" class="border border-gray-300 rounded-lg p-2 text-sm focus:ring-primary-500 focus:border-primary-500">
             <option value="">-- 전체 지점 보기 --</option>
             <option v-for="branch in slotSettingsBranches" :value="branch.id" :key="branch.id">
                 {{ branch.branch_name_ko }}
@@ -147,7 +147,7 @@
         <button 
           @click="openSlotBatchModal('default')"
           :disabled="!selectedSlotBranchId"
-          class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:bg-gray-400 flex items-center"
+          class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition disabled:bg-gray-400 flex items-center"
         >
           <i class="ph ph-gear mr-2"></i> 기본 슬롯 설정
         </button>
@@ -170,7 +170,7 @@
                 
                 <div 
                   @click="openSlotEditModal(branch.id, masterSlot.id, currentSlotDate, true)"
-                  class="p-2 rounded-lg transition-colors hover:bg-red-50/70 cursor-pointer border"
+                  class="p-2 rounded-lg transition-colors hover:bg-primary-50/70 cursor-pointer border"
                   :class="getSlotDisplayClass(branch.id, masterSlot.id, currentSlotDate)"
                 >
                   <p class="font-bold">{{ getSlotValue(branch.id, masterSlot.id, currentSlotDate) }}</p>
@@ -190,7 +190,7 @@
         <h2 class="text-xl font-bold text-gray-800">메일 템플릿 관리</h2>
         <button 
           @click="openMailTemplateModal(null)"
-          class="px-4 py-2 bg-red-800 text-white rounded-lg hover:bg-red-900 transition flex items-center"
+          class="px-4 py-2 bg-primary-800 text-white rounded-lg hover:bg-primary-900 transition flex items-center"
         >
           <i class="ph ph-plus mr-2"></i> 템플릿 추가
         </button>
