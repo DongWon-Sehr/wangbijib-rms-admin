@@ -2,6 +2,12 @@
  * [Config] 전역 설정 및 상수 관리 (Singleton)
  */
 const Config = {
+  // 0. App Version (배포 시 여기를 직접 올림 — UI/탭 타이틀에 자동 반영)
+  APP_VERSION: '2.0.75',
+
+  // 0-1. BI 로고 (스크립트 소유 계정 Drive 파일)
+  LOGO_FILE_ID: '1Ni3HhXrloRWe_idt2XeroEvcS--n6BK9',
+
   // 1. Spreadsheet ID
   SPREADSHEET_ID: SpreadsheetApp.getActiveSpreadsheet().getId(),
 

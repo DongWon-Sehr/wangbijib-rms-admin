@@ -61,7 +61,13 @@
     }
   };
 
-  createApp({
+  // 텍스트영역 자동 높이: 기본 1줄, 내용에 따라 확장
+  const autoGrowResize = (el) => {
+    el.style.height = 'auto';
+    el.style.height = (el.scrollHeight + 2) + 'px';
+  };
+
+  const app = createApp({
     setup() {
       // ============================================================
       // A. STATE DECLARATION
@@ -76,10 +82,14 @@
       const isSyncing = ref(false);
       const appElement = document.getElementById('app');
       const BASE_WEBAPP_URL = appElement ? appElement.dataset.appUrl : '';
+      const appVersion = appElement ? (appElement.dataset.appVersion || '') : '';
+      const appLogo = appElement ? (appElement.dataset.appLogo || '') : '';
       
       const isProfileDropdownOpen = ref(false);
       const isNotificationOpen = ref(false);
       const isMutating = ref(false);
+      // [Race Guard] 마지막 뮤테이션 완료 시각 — 이 시각보다 먼저 시작된 동기화 응답(구버전 데이터)은 폐기
+      let lastMutationCompletedAt = 0;
       const isMobileMenuOpen = ref(false);
       const now = ref(new Date());
       const logoutUrl = 'https://accounts.google.com/logout';
@@ -264,8 +274,9 @@
         id: res.id,
         branch_id: res.branch_id,
         customer_name: res.customer_name,
-        pax: res.pax, email: res.email, notes: Util.collapseBlankLines(res.notes),
+        pax: res.pax, email: res.email, phone_number: res.phone_number, notes: Util.collapseBlankLines(res.notes),
         internal_notes: Util.collapseBlankLines(res.internal_notes),
+        private_notes: Util.collapseBlankLines(res.private_notes),
         deposit_status: res.deposit_status,
         deposit_amount: res.deposit_amount,
         status: res.status,
@@ -427,8 +438,9 @@
             const email = (res.email || '').replace(/\s+/g, '').toLowerCase();
             const notes = (res.notes || '').replace(/\s+/g, '').toLowerCase();
             const internal = (res.internal_notes || '').replace(/\s+/g, '').toLowerCase();
+            const priv = (res.private_notes || '').replace(/\s+/g, '').toLowerCase();
             const id = (res.id || '').replace(/\s+/g, '').toLowerCase();
-            return name.includes(text) || email.includes(text) || notes.includes(text) || internal.includes(text) || id.includes(text);
+            return name.includes(text) || email.includes(text) || notes.includes(text) || internal.includes(text) || priv.includes(text) || id.includes(text);
           });
         }
         if (filterStatus.value !== 'all') {
@@ -507,6 +519,7 @@
           if (type === 'reservation') {
             activeReservation.value = cloned;
             originalReservation.value = JSON.parse(JSON.stringify(data));
+            selectedMailTemplateId.value = '';
             if (cloned.is_read === false) {
               cloned.is_read = true;
               const listItem = reservations.value.find(r => r.id === cloned.id);
@@ -551,7 +564,7 @@
       
       const closeModal = (type) => {
         modalState[type] = false;
-        if (type === 'reservation') { activeReservation.value = null; originalReservation.value = null; }
+        if (type === 'reservation') { activeReservation.value = null; originalReservation.value = null; isStatusDropdownOpen.value = false; }
         if (type === 'system' || type === 'mail') {
            activeSystemData.value = null;
         }
@@ -589,7 +602,9 @@
         }
       };
       
-      const handleInlineStatusChange = async (res, field, newValue) => {
+      // [Optimistic] 로컬 상태 즉시 반영 후 백그라운드 서버 동기화, 실패 시 롤백
+      const handleInlineStatusChange = async (res, field, event) => {
+        const newValue = event.target.value;
         let confirmMsg = '';
         if (field === 'status') {
           const statusMap = { 'confirm': '예약 확정', 'cancel': '예약 취소', 'pending': '예약 대기' };
@@ -601,35 +616,23 @@
         }
 
         markAsReadOnClick(res);
-        
-        if (await showCustomConfirm('상태 변경', confirmMsg)) {
-          let payloadValue = newValue;
-          isMutating.value = true; // 뮤테이션 시작
 
-          try {
-            let r;
-            if (field === 'status') {
-              r = await runGoogleScript('apiUpdateReservationStatus', res.id, payloadValue);
-            } else if (field === 'deposit_status') {
-              r = await runGoogleScript('apiUpdateDepositStatus', res.id, payloadValue);
-            }
-            
-            if (r && r.success) {
-              res[field] = payloadValue;
-              showCustomAlert('성공', '변경되었습니다.');
-            } else {
-              showCustomAlert('오류', (r && r.message) || '요청이 실패했습니다.');
-              await refreshInitialData(true);
-            }
-          } catch (err) {
-            console.error('[Mutation Error] inline status change fail:', err);
-            showCustomAlert('오류', '네트워크 통신 중 에러가 발생했습니다: ' + err.message);
-            await refreshInitialData(true);
-          } finally {
-            isMutating.value = false; // 뮤테이션 종료
-          }
-        } else { 
-          await refreshInitialData(true); 
+        if (await showCustomConfirm('상태 변경', confirmMsg)) {
+          const snapshot = res[field];
+          res[field] = newValue;
+          isMutating.value = true;
+
+          const apiName = field === 'status' ? 'apiUpdateReservationStatus' : 'apiUpdateDepositStatus';
+          runGoogleScriptSilent(apiName, res.id, newValue)
+            .then(r => { if (!r || !r.success) throw new Error((r && r.message) || '요청이 실패했습니다.'); })
+            .catch(err => {
+              console.error('[Mutation Error] inline status change fail:', err);
+              res[field] = snapshot;
+              showCustomAlert('오류', '상태 변경에 실패하여 변경 전 상태로 되돌렸습니다.\n' + err.message);
+            })
+            .finally(() => { isMutating.value = false; lastMutationCompletedAt = Date.now(); });
+        } else {
+          event.target.value = res[field];
         }
       };
 
@@ -638,11 +641,11 @@
           const branch = branches.value.find(b => b.id === res.branch_id);
           const branchNameKo = branch ? branch.branch_name_ko : '알 수 없음';
           const titleBranchName = branchNameKo.replace('왕비집', '').trim();
+          // 신규/변경 판단은 message_sent_at이 아닌 예약 상태 기준: 대기=신규, 완료=변경
           const status = res.status;
-          const messageSentAt = res.message_sent_at || '';
           let title;
           if (status === 'cancel') title = '🔴 [취소] ' + titleBranchName + ' 예약알림';
-          else if (status === 'pending' || !messageSentAt) title = '🟢 [신규] ' + titleBranchName + ' 예약알림';
+          else if (status === 'pending') title = '🟢 [신규] ' + titleBranchName + ' 예약알림';
           else title = '🟡 [변경] ' + titleBranchName + ' 예약알림';
           const dateObj = new Date(res.reservation_date);
           const dateStr = Util.formatDate(dateObj, 'kakao');
@@ -712,6 +715,7 @@
           }
         } catch(err) { console.error(err); alert('카카오톡 실행 실패'); }
       };
+      // [Optimistic] 발송 완료 상태 즉시 반영 후 백그라운드 서버 동기화, 실패 시 롤백
       const confirmKakao = async (e, res) => {
         if (e) e.stopPropagation();
         if (!res) return;
@@ -721,31 +725,38 @@
           runGoogleScriptSilent('apiMarkReservationAsRead', res.id);
         }
 
-        if (await showCustomConfirm("확인", "발송 완료 처리하시겠습니까?")) {
-          if (modalState.reservation) isModalLoading.value = true;
-          isMutating.value = true; // 뮤테이션 시작
-          try {
-            const response = await runGoogleScriptSilent('apiUpdateReservationMessageSentAt', res.id);
-            if (response.success) { 
-              const nowIso = new Date().toISOString();
-              res.message_sent_at = nowIso;
-              if (res.status === 'pending') res.status = 'confirm';
-              
-              const targetIdx = reservations.value.findIndex(r => r.id === res.id);
-              if (targetIdx > -1) {
-                const target = reservations.value[targetIdx];
-                target.message_sent_at = nowIso;
-                if (target.status === 'pending') target.status = 'confirm';
-              }
-              showCustomAlert("완료", "발송 완료처리 되었습니다."); 
-            } 
-            else showCustomAlert("실패", response.message);
-          } catch (e) { showCustomAlert("오류", e.message); }
-          finally { 
-            if (modalState.reservation) isModalLoading.value = false; 
-            isMutating.value = false; // 뮤테이션 종료
-          }
-        }
+        if (!(await showCustomConfirm("확인", "발송 완료 처리하시겠습니까?"))) return;
+
+        const listItem = reservations.value.find(r => r.id === res.id);
+        const snapshot = { message_sent_at: res.message_sent_at, status: res.status };
+        const nowIso = new Date().toISOString();
+
+        const applyTo = (t) => {
+          if (!t) return;
+          t.message_sent_at = nowIso;
+          if (t.status === 'pending') t.status = 'confirm';
+        };
+        const rollbackTo = (t) => {
+          if (!t) return;
+          t.message_sent_at = snapshot.message_sent_at;
+          t.status = snapshot.status;
+        };
+        const syncOriginal = modalState.reservation && originalReservation.value && originalReservation.value.id === res.id;
+
+        applyTo(res);
+        if (listItem && listItem !== res) applyTo(listItem);
+        if (syncOriginal) applyTo(originalReservation.value);
+
+        isMutating.value = true;
+        runGoogleScriptSilent('apiUpdateReservationMessageSentAt', res.id)
+          .then(response => { if (!response.success) throw new Error(response.message || '처리 실패'); })
+          .catch(err => {
+            rollbackTo(res);
+            if (listItem && listItem !== res) rollbackTo(listItem);
+            if (syncOriginal) rollbackTo(originalReservation.value);
+            showCustomAlert("오류", "발송 완료 처리에 실패하여 변경 전 상태로 되돌렸습니다.\n" + err.message);
+          })
+          .finally(() => { isMutating.value = false; lastMutationCompletedAt = Date.now(); });
       };
       const confirmDelete = async () => {
         if (await showCustomConfirm("삭제", "삭제하시겠습니까?")) {
@@ -795,6 +806,73 @@
         finally { if (!silent) isLoading.value = false; }
       };
 
+      // 예약금 금액: 콤마 자동 포맷 (숫자만 입력, 콤마 삽입/제거 시 커서 위치 보존)
+      const depositAmountDisplay = computed(() => {
+        if (!activeReservation.value) return '';
+        const v = activeReservation.value.deposit_amount;
+        if (v === null || v === undefined || v === '') return '';
+        const n = Number(v);
+        if (isNaN(n)) return '';
+        return n.toLocaleString('en-US');
+      });
+      const handleDepositAmountInput = (e) => {
+        const el = e.target;
+        const digitsBeforeCursor = el.value.slice(0, el.selectionStart).replace(/\D/g, '').length;
+        const digits = el.value.replace(/\D/g, '');
+        const num = digits ? parseInt(digits, 10) : 0;
+        if (activeReservation.value) activeReservation.value.deposit_amount = num;
+        const formatted = digits ? num.toLocaleString('en-US') : '';
+        el.value = formatted;
+        let pos = 0, count = 0;
+        while (pos < formatted.length && count < digitsBeforeCursor) {
+          if (formatted[pos] >= '0' && formatted[pos] <= '9') count++;
+          pos++;
+        }
+        el.setSelectionRange(pos, pos);
+      };
+      // 콤마를 없는 글자처럼 취급: 화살표는 콤마를 한 번에 건너뛰고, 삭제 키는 콤마가 아닌 인접 숫자를 지움
+      const handleDepositAmountKeydown = (e) => {
+        const el = e.target;
+        if (el.selectionStart !== el.selectionEnd) return;
+        const pos = el.selectionStart;
+        const val = el.value;
+        if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
+        // 커서 정착 위치는 항상 콤마 왼쪽(숫자 바로 뒤)으로 통일
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          let t = Math.max(0, pos - 1);
+          if (t > 0 && val[t - 1] === ',') t -= 1;
+          el.setSelectionRange(t, t);
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          let t = Math.min(val.length, pos + 1);
+          if (val[t - 1] === ',') t += 1;
+          t = Math.min(val.length, t);
+          el.setSelectionRange(t, t);
+        } else if (e.key === 'Backspace' && pos >= 2 && val[pos - 1] === ',') {
+          e.preventDefault();
+          el.value = val.slice(0, pos - 2) + val.slice(pos - 1);
+          el.setSelectionRange(pos - 2, pos - 2);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        } else if (e.key === 'Delete' && val[pos] === ',') {
+          e.preventDefault();
+          el.value = val.slice(0, pos + 1) + val.slice(pos + 2);
+          el.setSelectionRange(pos + 1, pos + 1);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      };
+
+      // 모달 헤더 뱃지 클릭 → 상태 선택 드롭다운 (저장 전 로컬 변경)
+      const isStatusDropdownOpen = ref(false);
+      const toggleStatusDropdown = (e) => {
+        if (e) e.stopPropagation();
+        isStatusDropdownOpen.value = !isStatusDropdownOpen.value;
+      };
+      const setReservationStatus = (s) => {
+        if (activeReservation.value) activeReservation.value.status = s;
+        isStatusDropdownOpen.value = false;
+      };
+
       // Modal Watchers & Handlers
       watch(activeReservation, (newRes) => {
         if (newRes && newRes.reservation_date) {
@@ -803,40 +881,44 @@
         }
       });
 
+      // [Optimistic] 모달/리스트 상태 즉시 반영 후 백그라운드 서버 저장, 실패 시 롤백
       const handleSaveReservation = async () => {
-        if (isReservationFormValid.value === false) { 
-          showCustomAlert("확인", isSelectionInvalid.value ? "시간대 마감" : "입력값 확인"); return; 
+        if (isReservationFormValid.value === false) {
+          showCustomAlert("확인", isSelectionInvalid.value ? "시간대 마감" : "입력값 확인"); return;
         }
- 
-        isModalLoading.value = true;
-        isMutating.value = true; // 뮤테이션 시작
+
         const d = activeReservation.value;
         const payload = createUpdatePayload(d);
         payload.visit_date = localDateTime.date;
         payload.visit_time = localDateTime.time;
- 
-        try {
-          const res = await runGoogleScriptSilent('apiUpdateReservation', payload);
-          if (res.success) { 
-            const newDateIso = new Date(payload.visit_date + ' ' + payload.visit_time).toISOString();
-            activeReservation.value.reservation_date = newDateIso;
-            activeReservation.value.notes = payload.notes;
-            activeReservation.value.internal_notes = payload.internal_notes;
-            const targetIdx = reservations.value.findIndex(r => r.id === d.id);
-            if (targetIdx > -1) {
-              const target = reservations.value[targetIdx];
-              Object.assign(target, payload);
-              target.reservation_date = newDateIso;
-              target.status = payload.status;
-            }
-            originalReservation.value = JSON.parse(JSON.stringify(activeReservation.value)); 
-          } 
-          else showCustomAlert("오류", res.message);
-        } catch (e) { showCustomAlert("오류", e.message); }
-        finally { 
-          isModalLoading.value = false; 
-          isMutating.value = false; // 뮤테이션 종료
+        const newDateIso = new Date(payload.visit_date + ' ' + payload.visit_time).toISOString();
+
+        const target = reservations.value.find(r => r.id === d.id);
+        const listSnapshot = target ? JSON.parse(JSON.stringify(target)) : null;
+        const prevOriginal = originalReservation.value ? JSON.parse(JSON.stringify(originalReservation.value)) : null;
+
+        activeReservation.value.reservation_date = newDateIso;
+        activeReservation.value.notes = payload.notes;
+        activeReservation.value.internal_notes = payload.internal_notes;
+        activeReservation.value.private_notes = payload.private_notes;
+        if (target) {
+          Object.assign(target, payload);
+          target.reservation_date = newDateIso;
         }
+        originalReservation.value = JSON.parse(JSON.stringify(activeReservation.value));
+
+        isMutating.value = true;
+        runGoogleScriptSilent('apiUpdateReservation', payload)
+          .then(res => { if (!res.success) throw new Error(res.message || '저장 실패'); })
+          .catch(e => {
+            if (target && listSnapshot) Object.assign(target, listSnapshot);
+            if (modalState.reservation && activeReservation.value && activeReservation.value.id === payload.id && listSnapshot) {
+              activeReservation.value = JSON.parse(JSON.stringify(listSnapshot));
+              originalReservation.value = prevOriginal;
+            }
+            showCustomAlert("저장 실패", "서버 저장에 실패하여 변경 전 상태로 되돌렸습니다.\n" + e.message);
+          })
+          .finally(() => { isMutating.value = false; lastMutationCompletedAt = Date.now(); });
       };
       
       const sendCustomMail = async () => {
@@ -858,7 +940,7 @@
               }
             };
             const res = await runGoogleScriptSilent('apiSendTemplatedMail', payload);
-            if (res.success) { showCustomAlert("성공", "발송됨"); runGoogleScriptSilent('apiMarkReservationAsRead', activeReservation.value.id); } 
+            if (res.success) { showCustomAlert("성공", "발송됨"); selectedMailTemplateId.value = ''; runGoogleScriptSilent('apiMarkReservationAsRead', activeReservation.value.id); }
             else showCustomAlert("실패", res.message);
           } catch (e) { showCustomAlert("오류", e.message); }
           finally { isModalLoading.value = false; }
@@ -1051,6 +1133,40 @@
         }
       }, { deep: true });
 
+      // [Optimistic] 슬롯 저장 시 로컬 메모리(slotDefaults/slotOverrides)에 즉시 반영
+      const applySlotOptimistic = (apiType, d) => {
+        const upsertOverride = (branchId, masterId, dateStr, slot, enabled, reason) => {
+          const ov = slotOverrides.value.find(o =>
+            o.branch_id === branchId &&
+            String(o.slot_master_id) === String(masterId) &&
+            Util.formatDate(o.date, 'date') === dateStr
+          );
+          if (ov) {
+            ov.slot = Number(slot);
+            ov.enabled = enabled;
+            if (reason !== undefined) ov.reason = reason;
+          } else {
+            slotOverrides.value.push({ id: null, branch_id: branchId, slot_master_id: masterId, date: dateStr, slot: Number(slot), enabled: enabled, reason: reason || '' });
+          }
+        };
+
+        if (apiType === 'slot_override') {
+          upsertOverride(d.branch_id, d.slot_master_id, d.date, d.slot, d.enabled, d.reason);
+        } else if (apiType === 'slot_override_batch') {
+          Object.keys(d.payload).forEach(mid => {
+            const v = d.payload[mid];
+            upsertOverride(d.branch_id, mid, d.date, v.slot, v.enabled);
+          });
+        } else if (apiType === 'slot_batch') {
+          Object.keys(d.payload).forEach(mid => {
+            const v = d.payload[mid];
+            const def = slotDefaults.value.find(x => x.branch_id === d.branch_id && String(x.slot_master_id) === String(mid));
+            if (def) { def.slot = Number(v.slot); def.enabled = v.enabled; }
+            else slotDefaults.value.push({ branch_id: d.branch_id, slot_master_id: mid, slot: Number(v.slot), enabled: v.enabled });
+          });
+        }
+      };
+
       const handleSystemSave = async () => {
         let d = localData.value;
         let type = activeSystemData.value.type;
@@ -1075,10 +1191,31 @@
           }
         }
         
+        const isSlotSave = apiType === 'slot_override' || apiType === 'slot_batch' || apiType === 'slot_override_batch';
+        if (isSlotSave) {
+          const defaultsSnapshot = JSON.parse(JSON.stringify(slotDefaults.value));
+          const overridesSnapshot = JSON.parse(JSON.stringify(slotOverrides.value));
+
+          applySlotOptimistic(apiType, d);
+          closeModal('system');
+          showCustomAlert("저장 요청 완료", "변경사항이 관리자 화면에 즉시 반영되었습니다.\n\n실제 예약 사이트(위젯 캘린더)에는 반영되는 데 최대 몇 분이 걸릴 수 있습니다. 잠시 후 예약 사이트에 직접 접속하여 슬롯 상태가 정상 반영되었는지 확인해주세요.\n\n서버 저장에 실패할 경우 화면은 자동으로 변경 전 상태로 되돌아갑니다.");
+
+          isMutating.value = true;
+          runGoogleScriptSilent('apiSaveSystemSettings', apiType, d)
+            .then(res => { if (!res.success) throw new Error(res.message || '저장 실패'); })
+            .catch(e => {
+              slotDefaults.value = defaultsSnapshot;
+              slotOverrides.value = overridesSnapshot;
+              showCustomAlert("저장 실패", "슬롯 저장에 실패하여 변경 전 상태로 되돌렸습니다.\n" + e.message);
+            })
+            .finally(() => { isMutating.value = false; });
+          return;
+        }
+
         isModalLoading.value = true;
         try {
           const res = await runGoogleScriptSilent('apiSaveSystemSettings', apiType, d);
-          if (res.success) { showCustomAlert("완료", "저장됨"); await refreshInitialData(); closeModal('system'); } 
+          if (res.success) { showCustomAlert("완료", "저장됨"); await refreshInitialData(); closeModal('system'); }
           else showCustomAlert("오류", res.message);
         } catch(e) {
           showCustomAlert("오류", e.message);
@@ -1264,8 +1401,12 @@
             if (syncCountdown.value <= 0) {
               syncCountdown.value = 60;
               try {
-                const res = await runGoogleScriptSilent('apiGetReservations'); 
-                if (res.success) {
+                const syncStartedAt = Date.now();
+                const res = await runGoogleScriptSilent('apiGetReservations');
+                // [Race Guard] 응답 대기 중 뮤테이션이 발생했다면 이 응답은 취소/저장 이전의 구버전 데이터일 수 있으므로 폐기
+                if (isMutating.value || lastMutationCompletedAt > syncStartedAt) {
+                  console.warn('[Sync] 뮤테이션과 경합 감지 → 이번 동기화 응답 폐기');
+                } else if (res.success) {
                   // [Fix] 동기화 시 로컬에서 이미 읽음(is_read=true) 처리된 상태라면 서버의 과거 데이터(false)를 무시하고 로컬 상태 유지
                   res.data.forEach(serverRes => {
                     const localRes = reservations.value.find(r => r.id === serverRes.id);
@@ -1296,6 +1437,7 @@
         document.addEventListener('click', () => {
           isProfileDropdownOpen.value = false;
           isNotificationOpen.value = false;
+          isStatusDropdownOpen.value = false;
         });
         clockInterval = setInterval(() => {
           now.value = new Date();
@@ -1340,10 +1482,22 @@
         openMailTemplateModal: (t = null) => openModal('mail', { type: 'mail', mode: t ? 'edit' : 'create', data: t }),
         localDateTime, selectedMailTemplateId, localData, userBranchIds, slotBatchPayload, localMailData, availableKeywords, modalTitle, 
         isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid,
-        handleSaveReservation, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder, 
+        handleSaveReservation, isStatusDropdownOpen, toggleStatusDropdown, setReservationStatus, depositAmountDisplay, handleDepositAmountInput, handleDepositAmountKeydown, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder,
         renderPreview, isPreviewMode, togglePreview,
-        BASE_WEBAPP_URL
+        BASE_WEBAPP_URL, appVersion, appLogo
       };
     }
-  }).mount('#app');
+  });
+
+  app.directive('autogrow', {
+    mounted(el) {
+      el.style.overflowY = 'hidden';
+      el.style.resize = 'none';
+      autoGrowResize(el);
+      el.addEventListener('input', function() { autoGrowResize(el); });
+    },
+    updated(el) { autoGrowResize(el); }
+  });
+
+  app.mount('#app');
 </script>

@@ -29,7 +29,7 @@
             type="text"
             v-model="filterText"
             placeholder="고객명, 이메일, 메모, 예약ID 검색..."
-            class="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition bg-white text-sm"
+            class="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition bg-white text-sm"
           >
           <button
             v-if="filterText"
@@ -43,7 +43,7 @@
 
       <!-- 상태 필터 그룹 -->
       <div class="flex flex-row space-x-2">
-        <select v-model="filterStatus" class="border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm focus:ring-red-500 focus:border-red-500 cursor-pointer min-w-[120px]">
+        <select v-model="filterStatus" class="border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm focus:ring-primary-500 focus:border-primary-500 cursor-pointer min-w-[120px]">
           <option value="all">전체 상태</option>
           <option value="pending">⏳ 대기</option>
           <option value="confirm">✅ 예약</option>
@@ -68,7 +68,7 @@
           :key="branch.id"
           @click="toggleBranchFilter(branch.id)"
           :class="{ 
-            'bg-red-700 text-white shadow-md ring-2 ring-red-200': isBranchSelected(branch.id),
+            'bg-primary-700 text-white shadow-md ring-2 ring-primary-200': isBranchSelected(branch.id),
             'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-gray-300': !isBranchSelected(branch.id)
           }"
           class="px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 flex items-center"
@@ -86,7 +86,7 @@
       </div>
       <!-- 총 결과 수 -->
       <div class="text-sm font-bold text-gray-600">
-        총 <span class="text-red-700">{{ filteredReservations.length }}</span> 건
+        총 <span class="text-primary-700">{{ filteredReservations.length }}</span> 건
       </div>
     </div>
   </div>
@@ -175,7 +175,7 @@
             :key="branch.id"
             @click="toggleBranchFilter(branch.id)"
             :class="{
-              'bg-red-700 text-white shadow-md ring-2 ring-red-200': isBranchSelected(branch.id),
+              'bg-primary-700 text-white shadow-md ring-2 ring-primary-200': isBranchSelected(branch.id),
               'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-gray-300': !isBranchSelected(branch.id)
             }"
             class="px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 flex items-center"
@@ -198,7 +198,7 @@
      <div v-if="isPulling || isRefreshing" 
           class="absolute top-0 left-0 w-full flex justify-center items-center overflow-hidden transition-all duration-200 z-10 bg-white"
           :style="{ height: pullIndicatorHeight }">
-        <div v-if="isRefreshing" class="flex items-center space-x-2 text-red-600">
+        <div v-if="isRefreshing" class="flex items-center space-x-2 text-primary-600">
            <i class="ph ph-spinner animate-spin text-2xl"></i>
            <span class="text-sm font-bold">새로고침 중...</span>
         </div>
@@ -219,19 +219,19 @@
             <th @click="sortBy('reservation_date')"
               class="w-36 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition sticky left-0 bg-gray-50 z-30 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.1)]">
               방문 일시
-              <i v-if="sortKey === 'reservation_date'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 align-text-bottom text-red-600"></i>
+              <i v-if="sortKey === 'reservation_date'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 align-text-bottom text-primary-600"></i>
             </th>
 
             <th @click="sortBy('branch_name_ko')"
               class="w-28 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
               지점
-              <i v-if="sortKey === 'branch_name_ko'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+              <i v-if="sortKey === 'branch_name_ko'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-primary-600"></i>
             </th>
 
             <th @click="sortBy('customer_name')"
               class="w-32 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
               고객명
-              <i v-if="sortKey === 'customer_name'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+              <i v-if="sortKey === 'customer_name'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-primary-600"></i>
             </th>
 
             <th class="w-48 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase">이메일</th>
@@ -239,19 +239,19 @@
             <th @click="sortBy('pax')"
               class="w-16 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
               인원
-              <i v-if="sortKey === 'pax'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+              <i v-if="sortKey === 'pax'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-primary-600"></i>
             </th>
 
             <th @click="sortBy('status')"
               class="w-24 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
               상태
-              <i v-if="sortKey === 'status'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+              <i v-if="sortKey === 'status'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-primary-600"></i>
             </th>
 
             <th @click="sortBy('deposit_status')"
               class="w-28 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
               예약금
-              <i v-if="sortKey === 'deposit_status'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+              <i v-if="sortKey === 'deposit_status'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-primary-600"></i>
             </th>
 
             <th class="w-40 px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">고객 메모</th>
@@ -260,7 +260,7 @@
             <th @click="sortBy('booking_request_date')"
               class="w-32 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
               예약요청일
-              <i v-if="sortKey === 'booking_request_date'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-red-600"></i>
+              <i v-if="sortKey === 'booking_request_date'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-primary-600"></i>
             </th>
 
             <th class="w-20 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase">카카오톡</th>
@@ -268,7 +268,7 @@
         </thead>
         <tbody class="bg-white divide-y divide-gray-200 text-sm">
           <tr v-for="(res, index) in paginatedReservations" :key="res.id" @click="openReservationModal(res)"
-            class="group hover:bg-red-50/50 cursor-pointer transition-colors duration-150"
+            class="group hover:bg-primary-50/50 cursor-pointer transition-colors duration-150"
             :class="{ 'bg-gray-50': res.status === 'cancel', 'bg-amber-50': res.status === 'pending' }">
             <!-- 1. No. -->
             <td class="px-2 py-3 whitespace-nowrap text-center text-xs text-gray-500">
@@ -277,7 +277,7 @@
 
             <!-- 2. 방문일시 -->
             <td
-              class="px-2 py-3 whitespace-nowrap sticky left-0 group-hover:bg-red-50/50 transition-colors z-10 border-r border-gray-100 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]"
+              class="px-2 py-3 whitespace-nowrap sticky left-0 group-hover:bg-primary-50/50 transition-colors z-10 border-r border-gray-100 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]"
               :class="res.status === 'cancel' ? 'bg-gray-50' : (res.status === 'pending' ? 'bg-amber-50' : 'bg-white')">
               <div class="flex flex-col">
                 <span class="font-bold text-gray-900" :class="{ 'text-gray-400': res.status === 'cancel' }">{{ formatDate(res.reservation_date, 'date') }}</span>
@@ -311,8 +311,8 @@
             <td class="px-2 py-3 whitespace-nowrap text-center" @click.stop="markAsReadOnClick(res)">
               <select
                 :value="res.status"
-                @change="handleInlineStatusChange(res, 'status', $event.target.value)"
-                class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-red-500"
+                @change="handleInlineStatusChange(res, 'status', $event)"
+                class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-primary-500"
                 :class="{ 'bg-green-100 text-green-700 border-green-200': res.status === 'confirm', 'bg-red-100 text-red-700 border-red-200': res.status === 'cancel', 'bg-yellow-100 text-yellow-800 border-yellow-300': res.status === 'pending' }"
               >
                 <option value="pending">대기</option>
@@ -324,7 +324,7 @@
             <td class="px-2 py-3 whitespace-nowrap text-center" @click.stop="markAsReadOnClick(res)">
               <select
                  :value="res.deposit_status"
-                 @change="handleInlineStatusChange(res, 'deposit_status', $event.target.value)"
+                 @change="handleInlineStatusChange(res, 'deposit_status', $event)"
                  class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-amber-500"
                  :class="res.deposit_status === 'pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-100 text-green-800 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200')"
                >
@@ -339,9 +339,13 @@
             <td class="px-2 py-3 text-xs text-gray-500 truncate max-w-[200px]" :title="res.notes">{{ res.notes || '-' }}
             </td>
 
-            <!-- 10. 관리자 메모 -->
-            <td class="px-2 py-3 text-xs text-gray-500 truncate max-w-[200px]" :title="res.internal_notes">
-              <span v-if="res.internal_notes" class="text-red-600 font-medium bg-red-50 px-1 rounded">{{ res.internal_notes }}</span><span v-else>-</span>
+            <!-- 10. 관리자 메모 (+비공개 메모 존재 표시) -->
+            <td class="px-2 py-3 text-xs text-gray-500 max-w-[200px]">
+              <div class="flex items-center gap-1">
+                <i v-if="res.private_notes" class="ph-fill ph-lock-key text-gray-600 text-sm flex-shrink-0" :title="'비공개 메모: ' + res.private_notes"></i>
+                <span v-if="res.internal_notes" class="text-red-600 font-medium bg-red-50 px-1 rounded truncate" :title="res.internal_notes">{{ res.internal_notes }}</span>
+                <span v-else-if="!res.private_notes">-</span>
+              </div>
             </td>
 
             <!-- 11. 예약요청일 -->
@@ -386,7 +390,7 @@
         <!-- Card Header -->
         <div class="flex justify-between items-start mb-3">
           <div class="flex items-center space-x-3">
-            <div class="p-2 bg-red-50 rounded-lg text-red-600">
+            <div class="p-2 bg-primary-100 rounded-lg text-primary-700">
               <i class="ph-fill ph-user text-xl"></i>
             </div>
             <div>
@@ -408,7 +412,7 @@
               <span class="text-xs text-gray-400 font-medium tracking-tight">예약</span>
               <select
                 :value="res.status"
-                @change="handleInlineStatusChange(res, 'status', $event.target.value)"
+                @change="handleInlineStatusChange(res, 'status', $event)"
                 @click.stop="markAsReadOnClick(res)"
                 class="h-7 w-20 text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center"
                 :class="{ 'bg-green-50 text-green-700 border-green-200': res.status === 'confirm', 'bg-red-50 text-red-700 border-red-200': res.status === 'cancel', 'bg-yellow-50 text-yellow-700 border-yellow-200': res.status === 'pending' }"
@@ -424,7 +428,7 @@
               <span class="text-xs text-gray-400 font-medium tracking-tight">예약금</span>
               <select
                 :value="res.deposit_status"
-                @change="handleInlineStatusChange(res, 'deposit_status', $event.target.value)"
+                @change="handleInlineStatusChange(res, 'deposit_status', $event)"
                 @click.stop="markAsReadOnClick(res)"
                 class="h-7 w-20 text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center"
                 :class="res.deposit_status === 'pending' ? 'bg-amber-50 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-gray-50 text-gray-600 border-gray-100')"
@@ -465,6 +469,11 @@
           <div class="flex items-center" v-if="res.internal_notes">
             <i class="ph ph-lock-key w-5 text-red-400 text-lg flex-shrink-0"></i>
             <span class="text-xs text-red-600 font-medium line-clamp-2 break-all">{{ res.internal_notes }}</span>
+          </div>
+          <!-- 비공개 메모 (어드민 전용) -->
+          <div class="flex items-center" v-if="res.private_notes">
+            <i class="ph-fill ph-lock-key w-5 text-gray-500 text-lg flex-shrink-0"></i>
+            <span class="text-xs text-gray-600 line-clamp-2 break-all">{{ res.private_notes }}</span>
           </div>
           <!-- 예약요청일 (모바일) -->
           <div class="flex items-center text-xs text-gray-400 mt-1 pt-1 border-t border-gray-200">

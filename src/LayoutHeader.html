@@ -1,5 +1,5 @@
 <!-- LayoutHeader.html (GAS include용 템플릿) -->
-<header class="bg-red-800 text-white shadow-lg sticky top-0 z-40">
+<header class="bg-primary-800 text-white shadow-lg sticky top-0 z-40">
   <div class="container mx-auto px-4 py-3 flex items-center justify-between">
 
     <!-- 1. Left: Logo & Title -->
@@ -7,13 +7,16 @@
       @click="setCurrentView('list')">
       <a :href="BASE_WEBAPP_URL"
         class="flex items-center gap-2 cursor-pointer no-underline text-current">
-        <div class="bg-white p-1 rounded-full bg-opacity-10">
+        <img v-if="appLogo" :src="appLogo" alt="왕비집 BI" class="h-14 w-auto object-contain">
+        <div v-else class="bg-white p-1 rounded-full bg-opacity-10">
           <i class="ph ph-crown-simple text-3xl text-amber-400"></i>
         </div>
         <div>
-          <h1 class="text-xl font-bold tracking-wider hidden sm:block">왕비집 예약 시스템 v2.0</h1>
+          <h1 class="text-xl font-bold tracking-wider hidden sm:flex items-baseline gap-1.5">왕비집 예약 시스템
+            <span class="text-xs text-primary-200 font-mono font-normal">v{{ appVersion }}</span>
+          </h1>
           <h1 class="text-xl font-bold tracking-wider sm:hidden">왕비집 예약</h1>
-          <p class="text-[10px] text-red-200 font-medium tracking-widest hidden sm:block">PREMIUM DINING RESERVATION</p>
+          <p class="text-[10px] text-primary-200 font-medium tracking-widest hidden sm:block">PREMIUM DINING RESERVATION</p>
         </div>
       </a>
     </div>
@@ -22,7 +25,7 @@
     <div class="flex items-center space-x-3 md:space-x-4">
 
       <!-- Sync Countdown UI -->
-      <div v-if="currentUser" @click="handleManualRefresh" class="flex items-center bg-red-900/40 hover:bg-red-800/60 cursor-pointer transition-colors px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-red-100 text-[10px] sm:text-xs font-bold border border-red-800 shadow-inner" title="새로고침 (클릭 시 즉시 동기화)">
+      <div v-if="currentUser" @click="handleManualRefresh" class="flex items-center bg-primary-900/40 hover:bg-primary-800/60 cursor-pointer transition-colors px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-primary-100 text-[10px] sm:text-xs font-bold border border-primary-800 shadow-inner" title="새로고침 (클릭 시 즉시 동기화)">
         <i class="ph ph-arrows-clockwise mr-1 sm:mr-1.5 text-xs sm:text-sm" :class="{ 'animate-spin text-amber-400': isSyncing || syncCountdown === 60 }"></i>
         <span class="w-3 sm:w-4 text-center tabular-nums">{{ isSyncing ? '-' : syncCountdown }}</span>s
       </div>
@@ -31,13 +34,13 @@
       <div v-if="currentUser" class="relative">
         <button
           @click="toggleNotificationDropdown"
-          class="flex items-center justify-center p-2 rounded-full hover:bg-red-700/50 transition relative focus:outline-none border border-transparent hover:border-red-600/30"
+          class="flex items-center justify-center p-2 rounded-full hover:bg-primary-700/50 transition relative focus:outline-none border border-transparent hover:border-primary-600/30"
           title="알림 확인"
         >
-          <i class="ph ph-bell text-xl sm:text-2xl text-red-100"></i>
+          <i class="ph ph-bell text-xl sm:text-2xl text-primary-100"></i>
           <span
             v-if="notificationCount > 0"
-            class="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white ring-2 ring-red-800 shadow-md animate-pulse"
+            class="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-bold text-primary-900 ring-2 ring-primary-800 shadow-md animate-pulse"
           >
             {{ notificationCount }}
           </span>
@@ -60,7 +63,7 @@
             <!-- Dropdown Header -->
             <div class="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
               <span class="font-bold text-sm text-gray-900 flex items-center gap-1.5">
-                <i class="ph ph-bell font-bold text-base text-red-800"></i>
+                <i class="ph ph-bell font-bold text-base text-primary-800"></i>
                 알림 목록
               </span>
               <span v-if="notificationCount > 0" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
@@ -154,17 +157,17 @@
       </div>
 
       <!-- Tabs (Desktop Navigation) -->
-      <nav class="hidden md:flex space-x-1 bg-red-900/50 p-1 rounded-lg backdrop-blur-sm">
+      <nav class="hidden md:flex space-x-1 bg-primary-900/50 p-1 rounded-lg backdrop-blur-sm">
         <button
           @click="setCurrentView('list')"
-          :class="{ 'bg-white text-red-900 shadow-sm': currentView === 'list', 'text-red-100 hover:bg-red-700/50 hover:text-white': currentView !== 'list' }"
+          :class="{ 'bg-white text-primary-900 shadow-sm': currentView === 'list', 'text-primary-100 hover:bg-primary-700/50 hover:text-white': currentView !== 'list' }"
           class="px-4 py-1.5 rounded-md transition-all duration-200 flex items-center text-sm font-bold"
         >
           <i class="ph ph-list-checks mr-1.5 text-lg"></i> 예약 리스트
         </button>
         <button
           @click="setCurrentView('calendar')"
-          :class="{ 'bg-white text-red-900 shadow-sm': currentView === 'calendar', 'text-red-100 hover:bg-red-700/50 hover:text-white': currentView !== 'calendar' }"
+          :class="{ 'bg-white text-primary-900 shadow-sm': currentView === 'calendar', 'text-primary-100 hover:bg-primary-700/50 hover:text-white': currentView !== 'calendar' }"
           class="px-4 py-1.5 rounded-md transition-all duration-200 flex items-center text-sm font-bold"
         >
           <i class="ph ph-calendar-blank mr-1.5 text-lg"></i> 캘린더
@@ -172,7 +175,7 @@
         <button
           v-if="currentUser && currentUser.role === 'admin'"
           @click="setCurrentView('settings')"
-          :class="{ 'bg-white text-red-900 shadow-sm': currentView === 'settings', 'text-red-100 hover:bg-red-700/50 hover:text-white': currentView !== 'settings' }"
+          :class="{ 'bg-white text-primary-900 shadow-sm': currentView === 'settings', 'text-primary-100 hover:bg-primary-700/50 hover:text-white': currentView !== 'settings' }"
           class="px-4 py-1.5 rounded-md transition-all duration-200 flex items-center text-sm font-bold"
         >
           <i class="ph ph-gear-six mr-1.5 text-lg"></i> 설정
@@ -183,13 +186,13 @@
       <div class="relative hidden md:block" v-if="currentUser">
         <button
           @click="toggleProfileDropdown"
-          class="flex items-center space-x-2 pl-2 pr-1 py-1 rounded-full hover:bg-red-700/50 transition border border-transparent hover:border-red-600"
+          class="flex items-center space-x-2 pl-2 pr-1 py-1 rounded-full hover:bg-primary-700/50 transition border border-transparent hover:border-primary-600"
         >
           <div class="text-right hidden lg:block">
             <p class="text-xs font-bold leading-none">{{ currentUser.user_name }}</p>
-            <p class="text-[10px] text-red-200 leading-none mt-0.5">{{ currentUser.role.toUpperCase() }}</p>
+            <p class="text-[10px] text-primary-200 leading-none mt-0.5">{{ currentUser.role.toUpperCase() }}</p>
           </div>
-          <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 text-white flex items-center justify-center font-bold shadow-md border-2 border-red-800">
+          <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 text-white flex items-center justify-center font-bold shadow-md border-2 border-primary-800">
             {{ currentUser.user_name ? currentUser.user_name.charAt(0).toUpperCase() : 'U' }}
           </div>
         </button>
@@ -204,7 +207,7 @@
             <!-- Dropdown Header -->
             <div class="p-5 border-b border-gray-100 bg-gray-50 flex items-center space-x-3">
               <div
-                class="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-xl font-bold">
+                class="w-12 h-12 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xl font-bold">
                 {{ currentUser.user_name ? currentUser.user_name.charAt(0).toUpperCase() : 'U' }}
               </div>
               <div class="overflow-hidden">
@@ -241,7 +244,7 @@
       </div>
 
       <!-- Mobile Menu Button (Hamburger) -->
-      <button class="md:hidden p-2.5 rounded-lg hover:bg-red-700 transition text-white focus:outline-none focus:ring-2 focus:ring-red-400" @click="toggleMobileMenu">
+      <button class="md:hidden p-2.5 rounded-lg hover:bg-primary-700 transition text-white focus:outline-none focus:ring-2 focus:ring-primary-400" @click="toggleMobileMenu">
           <i class="ph ph-list text-2xl"></i>
       </button>
 
@@ -262,7 +265,7 @@
         :class="isMobileMenuOpen ? 'translate-x-0' : 'translate-x-full'">
 
         <!-- Drawer Header (User Info) -->
-        <div class="p-6 bg-red-800 text-white relative overflow-hidden">
+        <div class="p-6 bg-primary-800 text-white relative overflow-hidden">
           <div class="absolute top-0 right-0 p-4 opacity-10">
             <i class="ph ph-crown-simple text-9xl transform translate-x-4 -translate-y-4"></i>
           </div>
@@ -270,19 +273,19 @@
           <div class="relative z-10 flex flex-col">
             <div class="flex justify-between items-start mb-4">
               <div
-                class="w-14 h-14 rounded-full bg-white text-red-800 flex items-center justify-center text-2xl font-bold shadow-lg border-4 border-red-700">
+                class="w-14 h-14 rounded-full bg-white text-primary-800 flex items-center justify-center text-2xl font-bold shadow-lg border-4 border-primary-700">
                 {{ currentUser && currentUser.user_name ? currentUser.user_name.charAt(0).toUpperCase() : 'U' }}
               </div>
-              <button @click="toggleMobileMenu" class="p-2 bg-red-900 bg-opacity-50 rounded-full hover:bg-opacity-70 transition text-white">
+              <button @click="toggleMobileMenu" class="p-2 bg-primary-900 bg-opacity-50 rounded-full hover:bg-opacity-70 transition text-white">
                     <i class="ph ph-x text-xl"></i>
                   </button>
             </div>
 
             <h3 class="text-xl font-bold truncate">{{ currentUser ? currentUser.user_name : 'Guest' }}</h3>
-            <p class="text-xs text-red-200 truncate mb-2">{{ currentUser ? currentUser.user_email : '' }}</p>
+            <p class="text-xs text-primary-200 truncate mb-2">{{ currentUser ? currentUser.user_email : '' }}</p>
 
             <div class="flex" v-if="currentUser">
-              <span class="px-2 py-0.5 rounded bg-red-900 bg-opacity-40 text-xs font-medium border border-red-400 border-opacity-30 uppercase">
+              <span class="px-2 py-0.5 rounded bg-primary-900 bg-opacity-40 text-xs font-medium border border-primary-400 border-opacity-30 uppercase">
                     {{ currentUser.role }}
                   </span>
             </div>
@@ -296,41 +299,41 @@
           <button
                   @click="setCurrentViewAndCloseMenu('list')"
                   class="w-full flex items-center px-4 py-3 rounded-xl transition-all duration-200 group"
-                  :class="{ 'bg-red-50 text-red-800 font-bold': currentView === 'list', 'text-gray-600 hover:bg-gray-100': currentView !== 'list' }"
+                  :class="{ 'bg-primary-50 text-primary-800 font-bold': currentView === 'list', 'text-gray-600 hover:bg-gray-100': currentView !== 'list' }"
               >
                   <div class="w-10 h-10 rounded-full flex items-center justify-center mr-3 transition-colors"
-                       :class="currentView === 'list' ? 'bg-white text-red-600 shadow-sm' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'">
+                       :class="currentView === 'list' ? 'bg-white text-primary-600 shadow-sm' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'">
                       <i class="ph ph-list-checks text-xl"></i>
                   </div>
                   <span class="text-base">예약 리스트</span>
-                  <i v-if="currentView === 'list'" class="ph ph-check-circle ml-auto text-red-600"></i>
+                  <i v-if="currentView === 'list'" class="ph ph-check-circle ml-auto text-primary-600"></i>
               </button>
 
           <button
                   @click="setCurrentViewAndCloseMenu('calendar')"
                   class="w-full flex items-center px-4 py-3 rounded-xl transition-all duration-200 group"
-                  :class="{ 'bg-red-50 text-red-800 font-bold': currentView === 'calendar', 'text-gray-600 hover:bg-gray-100': currentView !== 'calendar' }"
+                  :class="{ 'bg-primary-50 text-primary-800 font-bold': currentView === 'calendar', 'text-gray-600 hover:bg-gray-100': currentView !== 'calendar' }"
               >
                   <div class="w-10 h-10 rounded-full flex items-center justify-center mr-3 transition-colors"
-                       :class="currentView === 'calendar' ? 'bg-white text-red-600 shadow-sm' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'">
+                       :class="currentView === 'calendar' ? 'bg-white text-primary-600 shadow-sm' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'">
                       <i class="ph ph-calendar-blank text-xl"></i>
                   </div>
                   <span class="text-base">캘린더</span>
-                  <i v-if="currentView === 'calendar'" class="ph ph-check-circle ml-auto text-red-600"></i>
+                  <i v-if="currentView === 'calendar'" class="ph ph-check-circle ml-auto text-primary-600"></i>
               </button>
 
           <button
                   v-if="currentUser && currentUser.role === 'admin'"
                   @click="setCurrentViewAndCloseMenu('settings')"
                   class="w-full flex items-center px-4 py-3 rounded-xl transition-all duration-200 group"
-                  :class="{ 'bg-red-50 text-red-800 font-bold': currentView === 'settings', 'text-gray-600 hover:bg-gray-100': currentView !== 'settings' }"
+                  :class="{ 'bg-primary-50 text-primary-800 font-bold': currentView === 'settings', 'text-gray-600 hover:bg-gray-100': currentView !== 'settings' }"
               >
                   <div class="w-10 h-10 rounded-full flex items-center justify-center mr-3 transition-colors"
-                       :class="currentView === 'settings' ? 'bg-white text-red-600 shadow-sm' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'">
+                       :class="currentView === 'settings' ? 'bg-white text-primary-600 shadow-sm' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'">
                       <i class="ph ph-gear-six text-xl"></i>
                   </div>
                   <span class="text-base">시스템 설정</span>
-                  <i v-if="currentView === 'settings'" class="ph ph-check-circle ml-auto text-red-600"></i>
+                  <i v-if="currentView === 'settings'" class="ph ph-check-circle ml-auto text-primary-600"></i>
               </button>
         </div>
 

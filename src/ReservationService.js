@@ -30,6 +30,7 @@ const ReservationService = {
     
     // 관리자 및 예약금 정보 (v1.4)
     'internal_notes': { type: 'string' },
+    'private_notes': { type: 'string' },   // 어드민 전용 비공개 메모 (카톡/캘린더 미공유)
     'deposit_status': { type: 'string' },
     'deposit_amount': { type: 'number' },
     'deposit_paid_at': { type: 'date' },
@@ -159,7 +160,7 @@ const ReservationService = {
         } else if (schemaDef.type === 'string') {
           safeValue = String(rawValue);
           // 노트/내부노트는 연속 줄바꿈을 단일 줄바꿈으로 축소
-          if (dbKey === 'notes' || dbKey === 'internal_notes') {
+          if (dbKey === 'notes' || dbKey === 'internal_notes' || dbKey === 'private_notes') {
             safeValue = Util.collapseBlankLines(safeValue);
           }
         } else if (schemaDef.type === 'date') {
