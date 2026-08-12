@@ -170,6 +170,7 @@
       const localData = ref({});
       const localDateTime = reactive({ date: '', time: '' });
       const selectedMailTemplateId = ref('');
+      const selectedAltBranchId = ref('');
       const userBranchIds = ref([]);
       const slotBatchPayload = reactive({ masterId: '', slot: 1, enabled: true, masterSlots: [] });
       const localMailData = ref({});
@@ -226,16 +227,20 @@
         isPulling.value = false;
       };
 
+      // 예약어 삽입 버튼 노출 순서: 고객/예약 → 지점 → 예약금 → 대체 지점
       const availableKeywords = [
         'customer_name',
-        'branch_name_en',
         'pax',
         'reservation_date',
         'reservation_time',
+        'branch_name_en',
+        'branch_address',
+        'branch_google_link',
         'deposit_amount',
         'deposit_url',
-        'address',
-        'google_map_link'
+        'alt_branch_name_en',
+        'alt_branch_address',
+        'alt_branch_google_link'
       ];
       const modalTitle = ref('');
 
@@ -255,7 +260,8 @@
           google.script.run
             .withSuccessHandler((res) => {
               finalize();
-              if (res.success) resolve(res); else reject(new Error(res.message || "API Error"));
+              // res가 null이면 서버 응답 직렬화 실패(Date 객체 포함 등)
+              if (res && res.success) resolve(res); else reject(new Error((res && res.message) || "서버 응답이 비어 있습니다 (직렬화 실패 가능)"));
             })
             .withFailureHandler((err) => {
               finalize();
@@ -268,7 +274,7 @@
         return new Promise((resolve, reject) => {
           google.script.run
             .withSuccessHandler((res) => {
-              if (res.success) resolve(res); else reject(new Error(res.message || "API Error"));
+              if (res && res.success) resolve(res); else reject(new Error((res && res.message) || "서버 응답이 비어 있습니다 (직렬화 실패 가능)"));
             })
             .withFailureHandler((err) => {
               reject(new Error(err));
@@ -553,6 +559,7 @@
             activeReservation.value = cloned;
             originalReservation.value = JSON.parse(JSON.stringify(data));
             selectedMailTemplateId.value = '';
+            selectedAltBranchId.value = '';
             if (cloned.is_read === false) {
               cloned.is_read = true;
               const listItem = reservations.value.find(r => r.id === cloned.id);
@@ -952,9 +959,25 @@
           .finally(() => { isMutating.value = false; lastMutationCompletedAt = Date.now(); });
       };
       
+      // 선택 템플릿 본문에 [[alt_ 예약어가 있으면 대체 지점 선택 UI 노출
+      const selectedTemplateNeedsAltBranch = computed(() => {
+        const tmpl = mailTemplates.value.find(t => t.id === selectedMailTemplateId.value);
+        return !!(tmpl && (tmpl.body_html || '').includes('[[alt_'));
+      });
+      // 대체 지점 후보: 현재 예약 지점을 제외한 활성 지점
+      const altBranchOptions = computed(() => {
+        const currentId = activeReservation.value ? activeReservation.value.branch_id : null;
+        return branches.value.filter(b => b.id !== currentId && (b.enabled === true || String(b.enabled) === 'true'));
+      });
+      watch(selectedMailTemplateId, () => { selectedAltBranchId.value = ''; });
+
       const sendCustomMail = async () => {
         const tmpl = mailTemplates.value.find(t => t.id === selectedMailTemplateId.value);
         if (!tmpl) { showCustomAlert("오류", "템플릿 선택"); return; }
+        if (selectedTemplateNeedsAltBranch.value && !selectedAltBranchId.value) {
+          showCustomAlert("알림", "이 템플릿은 대체 지점 안내용입니다. 안내할 지점을 선택해주세요.");
+          return;
+        }
 
         if (await showCustomConfirm("발송", "메일 발송하시겠습니까?")) {
           try {
@@ -963,18 +986,19 @@
             const payload = {
               threadId: activeReservation.value.email_thread_id,
               templateId: tmpl.id,
+              altBranchId: selectedTemplateNeedsAltBranch.value ? selectedAltBranchId.value : null,
               data: {
                 customer_name: activeReservation.value.customer_name,
                 branch_name_en: branchMapEn.value[activeReservation.value.branch_id],
                 pax: activeReservation.value.pax,
                 reservation_date: activeReservation.value.reservation_date,
                 deposit_amount: activeReservation.value.deposit_amount,
-                address: branch.address || '',
-                google_map_link: branch.google_map_link || ''
+                branch_address: branch.address || '',
+                branch_google_link: branch.google_map_link || ''
               }
             };
             const res = await runGoogleScriptSilent('apiSendTemplatedMail', payload);
-            if (res.success) { showCustomAlert("성공", "발송됨"); selectedMailTemplateId.value = ''; runGoogleScriptSilent('apiMarkReservationAsRead', activeReservation.value.id); }
+            if (res.success) { showCustomAlert("성공", "발송됨"); selectedMailTemplateId.value = ''; selectedAltBranchId.value = ''; runGoogleScriptSilent('apiMarkReservationAsRead', activeReservation.value.id); }
             else showCustomAlert("실패", res.message);
           } catch (e) { showCustomAlert("오류", e.message); }
           finally { isModalLoading.value = false; }
@@ -991,8 +1015,8 @@
               data: {
                 ...activeReservation.value,
                 branch_name_en: branchMapEn.value[activeReservation.value.branch_id],
-                address: branch.address || '',
-                google_map_link: branch.google_map_link || ''
+                branch_address: branch.address || '',
+                branch_google_link: branch.google_map_link || ''
               }
             };
             const res = await runGoogleScriptSilent('apiInitializeMailThread', payload);
@@ -1030,11 +1054,15 @@
       };
 
       // 2. 텍스트를 뱃지 HTML로 변환 (초기 로딩용)
+      // HTML 태그 내부(href 등 속성 안)의 [[key]]는 변환하지 않음 — 속성 안에 span이 들어가면 HTML이 깨짐
       const convertTextToBadgeHtml = (html) => {
         if (!html) return '';
-        return html.replace(/\[\[(.*?)\]\]/g, (match, kw) => {
-          return `<span class="custom-badge" contenteditable="false" data-value="${kw}">${kw}</span>`; 
-        });
+        return html.split(/(<[^>]*>)/g).map(part => {
+          if (part.startsWith('<')) return part;
+          return part.replace(/\[\[(.*?)\]\]/g, (match, kw) => {
+            return `<span class="custom-badge" contenteditable="false" data-value="${kw}">${kw}</span>`;
+          });
+        }).join('');
       };
 
       const initSummernote = () => {
@@ -1416,8 +1444,11 @@
           reservation_time: '18:30',
           deposit_amount: '100',
           deposit_url: 'https://example.deposit.url',
-          address: '21 Myeongdong 7-gil, Jung District, Seoul, South Korea',
-          google_map_link: 'https://maps.app.goo.gl/WqvmgHYLK3oDV7588',
+          branch_address: '21 Myeongdong 7-gil, Jung District, Seoul, South Korea',
+          branch_google_link: 'https://maps.app.goo.gl/WqvmgHYLK3oDV7588',
+          alt_branch_name_en: 'Wangbijib Myeongdong 2nd Branch',
+          alt_branch_address: '13 Myeongdong 9-gil, Jung District, Seoul, South Korea',
+          alt_branch_google_link: 'https://maps.app.goo.gl/ZcGAMDWPsUfL9D6i6',
         };
         
         // 1. [FIX] Handle existing badge spans (from Editor)
@@ -1431,14 +1462,15 @@
         });
 
         // 2. Handle raw brackets (fallback for DB loaded data not yet in editor)
-        const regex = /\[\[(.*?)\]\]/g;
-        processed = processed.replace(regex, (match, keyword) => {
-           if (isValidKeyword(keyword)) {
-              const displayValue = sampleData[keyword] || keyword;
-              return `<span class="custom-badge">${displayValue}</span>`;
-           }
-           return match;
-        });
+        // 태그 내부(href 등 속성)의 [[key]]는 span 없이 순수 값으로 치환해 미리보기에서 링크가 실제로 동작하게 함
+        processed = processed.split(/(<[^>]*>)/g).map(part => {
+          const isTag = part.startsWith('<');
+          return part.replace(/\[\[(.*?)\]\]/g, (match, keyword) => {
+            if (!isValidKeyword(keyword)) return match;
+            const displayValue = sampleData[keyword] || keyword;
+            return isTag ? displayValue : `<span class="custom-badge">${displayValue}</span>`;
+          });
+        }).join('');
         
         return `<div class="prose max-w-none">${processed}</div>`;
       };
@@ -1563,7 +1595,7 @@
         handleNotificationClick,
         // [MODIFIED] Added create mode support (null arg)
         openMailTemplateModal: (t = null) => openModal('mail', { type: 'mail', mode: t ? 'edit' : 'create', data: t }),
-        localDateTime, selectedMailTemplateId, localData, userBranchIds, slotBatchPayload, localMailData, availableKeywords, modalTitle, 
+        localDateTime, selectedMailTemplateId, selectedAltBranchId, selectedTemplateNeedsAltBranch, altBranchOptions, localData, userBranchIds, slotBatchPayload, localMailData, availableKeywords, modalTitle, 
         isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid, isReservationDirty, isSystemDirty, isMailDirty, toast, cellTip, showCellTip, hideCellTip,
         handleSaveReservation, isStatusDropdownOpen, toggleStatusDropdown, setReservationStatus, depositAmountDisplay, handleDepositAmountInput, handleDepositAmountKeydown, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder,
         renderPreview, isPreviewMode, togglePreview,

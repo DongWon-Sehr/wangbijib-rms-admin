@@ -274,9 +274,28 @@ function apiUpdateDepositStatus(id, status) {
  */
 function apiSendTemplatedMail(payload) {
   return _executeApi('apiSendTemplatedMail', () => {
-    const { threadId, templateId, data } = payload;
+    const { threadId, templateId, data, altBranchId } = payload;
 
     data.reservation_time = Util.formatDate(data.reservation_date, 'time');
+
+    // 대체 지점 안내: 클라이언트는 alt_branch_id만 전달, 지점 정보 조회 및 예약어 주입은 서버에서 수행
+    // 조회 실패 또는 필수 정보(영문명/주소/구글맵 링크) 누락 시 발송을 중단하고 실패 응답 반환
+    if (altBranchId) {
+      const altBranch = BranchService.getBranchById(altBranchId);
+      if (!altBranch) {
+        return Util.createResponse(false, null, '대체 지점 정보를 찾을 수 없어 발송을 취소했습니다.');
+      }
+      const missing = [];
+      if (!altBranch.branch_name_en) missing.push('영문 지점명');
+      if (!altBranch.address) missing.push('주소');
+      if (!altBranch.google_map_link) missing.push('구글맵 링크');
+      if (missing.length > 0) {
+        return Util.createResponse(false, null, '대체 지점의 필수 정보(' + missing.join(', ') + ')가 비어 있어 발송을 취소했습니다. 지점 관리에서 정보를 입력한 후 다시 시도해주세요.');
+      }
+      data.alt_branch_name_en = altBranch.branch_name_en;
+      data.alt_branch_address = altBranch.address;
+      data.alt_branch_google_link = altBranch.google_map_link;
+    }
 
     return GmailService.replyToThreadWithTemplate(threadId, templateId, data);
   }, payload);

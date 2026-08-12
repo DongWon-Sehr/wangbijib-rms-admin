@@ -100,33 +100,30 @@ const GmailService = {
     }
   },
 
+  // 예약어 치환 특수 처리 대상 (일반 순회 치환에서 제외/가공되는 키)
+  PLACEHOLDER_RULES: {
+    DATE_FORMAT_KEYS: ['reservation_date', 'reservation_time'], // 날짜 포맷팅 블록에서 별도 치환
+    COMMA_FORMAT_KEYS: ['deposit_amount'],                      // 천 단위 콤마 포맷 적용
+  },
+
   /**
    * 예약어 치환 헬퍼 (대괄호 [[ ]] 지원)
    */
   replacePlaceholders(html, data) {
     let result = html;
+    const rules = this.PLACEHOLDER_RULES;
 
-    // 기본 키워드 치환
-    const keys = [
-      'customer_name',
-      'branch_name_en',
-      'pax',
-      'notes',
-      'deposit_amount',
-    ];
-    keys.forEach(key => {
-      // [[key]] 패턴 사용
-      // 특수문자 이스케이프: [ -> \\[, ] -> \\]
+    // 데이터 키 전체를 순회하며 [[key]] 치환 (신규 예약어 추가 시 별도 수정 불필요)
+    Object.keys(data).forEach(key => {
+      if (rules.DATE_FORMAT_KEYS.includes(key)) return;
       const regex = new RegExp('\\[\\[' + key + '\\]\\]', 'g');
-      let replaceValue = data[key] || '';
-      
-      // deposit_amount는 콤마(,) 포맷팅 처리
-      if (key === 'deposit_amount' && typeof data[key] === 'number') {
-        replaceValue = data[key].toLocaleString();
-      } else if (key === 'deposit_amount' && !isNaN(Number(data[key])) && data[key]) {
+      let replaceValue = data[key];
+      if (replaceValue === null || replaceValue === undefined) replaceValue = '';
+
+      if (rules.COMMA_FORMAT_KEYS.includes(key) && data[key] !== '' && !isNaN(Number(data[key]))) {
         replaceValue = Number(data[key]).toLocaleString();
       }
-      
+
       result = result.replace(regex, replaceValue);
     });
 
