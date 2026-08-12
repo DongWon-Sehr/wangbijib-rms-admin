@@ -43,8 +43,9 @@ const MailTemplateService = {
 
       const newRow = Util.convertObjectToRow(newObj, headers);
       sheet.appendRow(newRow);
-      
-      return Util.createResponse(true, newObj);
+
+      // google.script.run은 Date 객체를 직렬화하지 못해 응답 전체가 null이 되므로 ISO 문자열로 변환해 반환
+      return Util.createResponse(true, { ...newObj, created_at: now.toISOString(), updated_at: now.toISOString() });
     } catch (e) {
       return Util.createResponse(false, null, e.message);
     }
