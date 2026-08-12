@@ -311,7 +311,7 @@
             <td class="px-2 py-3 whitespace-nowrap text-center" @click.stop="markAsReadOnClick(res)">
               <select
                 :value="res.status"
-                @change="handleInlineStatusChange(res, 'status', $event.target.value)"
+                @change="handleInlineStatusChange(res, 'status', $event)"
                 class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-red-500"
                 :class="{ 'bg-green-100 text-green-700 border-green-200': res.status === 'confirm', 'bg-red-100 text-red-700 border-red-200': res.status === 'cancel', 'bg-yellow-100 text-yellow-800 border-yellow-300': res.status === 'pending' }"
               >
@@ -324,7 +324,7 @@
             <td class="px-2 py-3 whitespace-nowrap text-center" @click.stop="markAsReadOnClick(res)">
               <select
                  :value="res.deposit_status"
-                 @change="handleInlineStatusChange(res, 'deposit_status', $event.target.value)"
+                 @change="handleInlineStatusChange(res, 'deposit_status', $event)"
                  class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-amber-500"
                  :class="res.deposit_status === 'pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-100 text-green-800 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200')"
                >
@@ -408,7 +408,7 @@
               <span class="text-xs text-gray-400 font-medium tracking-tight">예약</span>
               <select
                 :value="res.status"
-                @change="handleInlineStatusChange(res, 'status', $event.target.value)"
+                @change="handleInlineStatusChange(res, 'status', $event)"
                 @click.stop="markAsReadOnClick(res)"
                 class="h-7 w-20 text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center"
                 :class="{ 'bg-green-50 text-green-700 border-green-200': res.status === 'confirm', 'bg-red-50 text-red-700 border-red-200': res.status === 'cancel', 'bg-yellow-50 text-yellow-700 border-yellow-200': res.status === 'pending' }"
@@ -424,7 +424,7 @@
               <span class="text-xs text-gray-400 font-medium tracking-tight">예약금</span>
               <select
                 :value="res.deposit_status"
-                @change="handleInlineStatusChange(res, 'deposit_status', $event.target.value)"
+                @change="handleInlineStatusChange(res, 'deposit_status', $event)"
                 @click.stop="markAsReadOnClick(res)"
                 class="h-7 w-20 text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center"
                 :class="res.deposit_status === 'pending' ? 'bg-amber-50 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-gray-50 text-gray-600 border-gray-100')"

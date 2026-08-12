@@ -8,9 +8,10 @@ function doGet(e) {
     const webAppUrl = ScriptApp.getService().getUrl();
     const template = HtmlService.createTemplateFromFile('index');
     template.BASE_WEBAPP_URL = webAppUrl;
+    template.APP_VERSION = Config.APP_VERSION;
 
     return template.evaluate()
-      .setTitle('왕비집 예약관리 시스템 v2.0')
+      .setTitle('왕비집 예약관리 시스템 v' + Config.APP_VERSION)
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   } catch (err) {

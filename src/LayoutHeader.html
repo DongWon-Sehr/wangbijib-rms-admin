@@ -11,7 +11,9 @@
           <i class="ph ph-crown-simple text-3xl text-amber-400"></i>
         </div>
         <div>
-          <h1 class="text-xl font-bold tracking-wider hidden sm:block">왕비집 예약 시스템 v2.0</h1>
+          <h1 class="text-xl font-bold tracking-wider hidden sm:flex items-baseline gap-1.5">왕비집 예약 시스템
+            <span class="text-xs text-red-200 font-mono font-normal">v{{ appVersion }}</span>
+          </h1>
           <h1 class="text-xl font-bold tracking-wider sm:hidden">왕비집 예약</h1>
           <p class="text-[10px] text-red-200 font-medium tracking-widest hidden sm:block">PREMIUM DINING RESERVATION</p>
         </div>
@@ -37,7 +39,7 @@
           <i class="ph ph-bell text-xl sm:text-2xl text-red-100"></i>
           <span
             v-if="notificationCount > 0"
-            class="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white ring-2 ring-red-800 shadow-md animate-pulse"
+            class="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-bold text-red-900 ring-2 ring-red-800 shadow-md animate-pulse"
           >
             {{ notificationCount }}
           </span>

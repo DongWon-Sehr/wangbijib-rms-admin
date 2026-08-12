@@ -76,6 +76,7 @@
       const isSyncing = ref(false);
       const appElement = document.getElementById('app');
       const BASE_WEBAPP_URL = appElement ? appElement.dataset.appUrl : '';
+      const appVersion = appElement ? (appElement.dataset.appVersion || '') : '';
       
       const isProfileDropdownOpen = ref(false);
       const isNotificationOpen = ref(false);
@@ -507,6 +508,7 @@
           if (type === 'reservation') {
             activeReservation.value = cloned;
             originalReservation.value = JSON.parse(JSON.stringify(data));
+            selectedMailTemplateId.value = '';
             if (cloned.is_read === false) {
               cloned.is_read = true;
               const listItem = reservations.value.find(r => r.id === cloned.id);
@@ -589,7 +591,9 @@
         }
       };
       
-      const handleInlineStatusChange = async (res, field, newValue) => {
+      // [Optimistic] 로컬 상태 즉시 반영 후 백그라운드 서버 동기화, 실패 시 롤백
+      const handleInlineStatusChange = async (res, field, event) => {
+        const newValue = event.target.value;
         let confirmMsg = '';
         if (field === 'status') {
           const statusMap = { 'confirm': '예약 확정', 'cancel': '예약 취소', 'pending': '예약 대기' };
@@ -601,35 +605,23 @@
         }
 
         markAsReadOnClick(res);
-        
-        if (await showCustomConfirm('상태 변경', confirmMsg)) {
-          let payloadValue = newValue;
-          isMutating.value = true; // 뮤테이션 시작
 
-          try {
-            let r;
-            if (field === 'status') {
-              r = await runGoogleScript('apiUpdateReservationStatus', res.id, payloadValue);
-            } else if (field === 'deposit_status') {
-              r = await runGoogleScript('apiUpdateDepositStatus', res.id, payloadValue);
-            }
-            
-            if (r && r.success) {
-              res[field] = payloadValue;
-              showCustomAlert('성공', '변경되었습니다.');
-            } else {
-              showCustomAlert('오류', (r && r.message) || '요청이 실패했습니다.');
-              await refreshInitialData(true);
-            }
-          } catch (err) {
-            console.error('[Mutation Error] inline status change fail:', err);
-            showCustomAlert('오류', '네트워크 통신 중 에러가 발생했습니다: ' + err.message);
-            await refreshInitialData(true);
-          } finally {
-            isMutating.value = false; // 뮤테이션 종료
-          }
-        } else { 
-          await refreshInitialData(true); 
+        if (await showCustomConfirm('상태 변경', confirmMsg)) {
+          const snapshot = res[field];
+          res[field] = newValue;
+          isMutating.value = true;
+
+          const apiName = field === 'status' ? 'apiUpdateReservationStatus' : 'apiUpdateDepositStatus';
+          runGoogleScriptSilent(apiName, res.id, newValue)
+            .then(r => { if (!r || !r.success) throw new Error((r && r.message) || '요청이 실패했습니다.'); })
+            .catch(err => {
+              console.error('[Mutation Error] inline status change fail:', err);
+              res[field] = snapshot;
+              showCustomAlert('오류', '상태 변경에 실패하여 변경 전 상태로 되돌렸습니다.\n' + err.message);
+            })
+            .finally(() => { isMutating.value = false; });
+        } else {
+          event.target.value = res[field];
         }
       };
 
@@ -638,11 +630,11 @@
           const branch = branches.value.find(b => b.id === res.branch_id);
           const branchNameKo = branch ? branch.branch_name_ko : '알 수 없음';
           const titleBranchName = branchNameKo.replace('왕비집', '').trim();
+          // 신규/변경 판단은 message_sent_at이 아닌 예약 상태 기준: 대기=신규, 완료=변경
           const status = res.status;
-          const messageSentAt = res.message_sent_at || '';
           let title;
           if (status === 'cancel') title = '🔴 [취소] ' + titleBranchName + ' 예약알림';
-          else if (status === 'pending' || !messageSentAt) title = '🟢 [신규] ' + titleBranchName + ' 예약알림';
+          else if (status === 'pending') title = '🟢 [신규] ' + titleBranchName + ' 예약알림';
           else title = '🟡 [변경] ' + titleBranchName + ' 예약알림';
           const dateObj = new Date(res.reservation_date);
           const dateStr = Util.formatDate(dateObj, 'kakao');
@@ -712,6 +704,7 @@
           }
         } catch(err) { console.error(err); alert('카카오톡 실행 실패'); }
       };
+      // [Optimistic] 발송 완료 상태 즉시 반영 후 백그라운드 서버 동기화, 실패 시 롤백
       const confirmKakao = async (e, res) => {
         if (e) e.stopPropagation();
         if (!res) return;
@@ -721,31 +714,38 @@
           runGoogleScriptSilent('apiMarkReservationAsRead', res.id);
         }
 
-        if (await showCustomConfirm("확인", "발송 완료 처리하시겠습니까?")) {
-          if (modalState.reservation) isModalLoading.value = true;
-          isMutating.value = true; // 뮤테이션 시작
-          try {
-            const response = await runGoogleScriptSilent('apiUpdateReservationMessageSentAt', res.id);
-            if (response.success) { 
-              const nowIso = new Date().toISOString();
-              res.message_sent_at = nowIso;
-              if (res.status === 'pending') res.status = 'confirm';
-              
-              const targetIdx = reservations.value.findIndex(r => r.id === res.id);
-              if (targetIdx > -1) {
-                const target = reservations.value[targetIdx];
-                target.message_sent_at = nowIso;
-                if (target.status === 'pending') target.status = 'confirm';
-              }
-              showCustomAlert("완료", "발송 완료처리 되었습니다."); 
-            } 
-            else showCustomAlert("실패", response.message);
-          } catch (e) { showCustomAlert("오류", e.message); }
-          finally { 
-            if (modalState.reservation) isModalLoading.value = false; 
-            isMutating.value = false; // 뮤테이션 종료
-          }
-        }
+        if (!(await showCustomConfirm("확인", "발송 완료 처리하시겠습니까?"))) return;
+
+        const listItem = reservations.value.find(r => r.id === res.id);
+        const snapshot = { message_sent_at: res.message_sent_at, status: res.status };
+        const nowIso = new Date().toISOString();
+
+        const applyTo = (t) => {
+          if (!t) return;
+          t.message_sent_at = nowIso;
+          if (t.status === 'pending') t.status = 'confirm';
+        };
+        const rollbackTo = (t) => {
+          if (!t) return;
+          t.message_sent_at = snapshot.message_sent_at;
+          t.status = snapshot.status;
+        };
+        const syncOriginal = modalState.reservation && originalReservation.value && originalReservation.value.id === res.id;
+
+        applyTo(res);
+        if (listItem && listItem !== res) applyTo(listItem);
+        if (syncOriginal) applyTo(originalReservation.value);
+
+        isMutating.value = true;
+        runGoogleScriptSilent('apiUpdateReservationMessageSentAt', res.id)
+          .then(response => { if (!response.success) throw new Error(response.message || '처리 실패'); })
+          .catch(err => {
+            rollbackTo(res);
+            if (listItem && listItem !== res) rollbackTo(listItem);
+            if (syncOriginal) rollbackTo(originalReservation.value);
+            showCustomAlert("오류", "발송 완료 처리에 실패하여 변경 전 상태로 되돌렸습니다.\n" + err.message);
+          })
+          .finally(() => { isMutating.value = false; });
       };
       const confirmDelete = async () => {
         if (await showCustomConfirm("삭제", "삭제하시겠습니까?")) {
@@ -803,40 +803,43 @@
         }
       });
 
+      // [Optimistic] 모달/리스트 상태 즉시 반영 후 백그라운드 서버 저장, 실패 시 롤백
       const handleSaveReservation = async () => {
-        if (isReservationFormValid.value === false) { 
-          showCustomAlert("확인", isSelectionInvalid.value ? "시간대 마감" : "입력값 확인"); return; 
+        if (isReservationFormValid.value === false) {
+          showCustomAlert("확인", isSelectionInvalid.value ? "시간대 마감" : "입력값 확인"); return;
         }
- 
-        isModalLoading.value = true;
-        isMutating.value = true; // 뮤테이션 시작
+
         const d = activeReservation.value;
         const payload = createUpdatePayload(d);
         payload.visit_date = localDateTime.date;
         payload.visit_time = localDateTime.time;
- 
-        try {
-          const res = await runGoogleScriptSilent('apiUpdateReservation', payload);
-          if (res.success) { 
-            const newDateIso = new Date(payload.visit_date + ' ' + payload.visit_time).toISOString();
-            activeReservation.value.reservation_date = newDateIso;
-            activeReservation.value.notes = payload.notes;
-            activeReservation.value.internal_notes = payload.internal_notes;
-            const targetIdx = reservations.value.findIndex(r => r.id === d.id);
-            if (targetIdx > -1) {
-              const target = reservations.value[targetIdx];
-              Object.assign(target, payload);
-              target.reservation_date = newDateIso;
-              target.status = payload.status;
-            }
-            originalReservation.value = JSON.parse(JSON.stringify(activeReservation.value)); 
-          } 
-          else showCustomAlert("오류", res.message);
-        } catch (e) { showCustomAlert("오류", e.message); }
-        finally { 
-          isModalLoading.value = false; 
-          isMutating.value = false; // 뮤테이션 종료
+        const newDateIso = new Date(payload.visit_date + ' ' + payload.visit_time).toISOString();
+
+        const target = reservations.value.find(r => r.id === d.id);
+        const listSnapshot = target ? JSON.parse(JSON.stringify(target)) : null;
+        const prevOriginal = originalReservation.value ? JSON.parse(JSON.stringify(originalReservation.value)) : null;
+
+        activeReservation.value.reservation_date = newDateIso;
+        activeReservation.value.notes = payload.notes;
+        activeReservation.value.internal_notes = payload.internal_notes;
+        if (target) {
+          Object.assign(target, payload);
+          target.reservation_date = newDateIso;
         }
+        originalReservation.value = JSON.parse(JSON.stringify(activeReservation.value));
+
+        isMutating.value = true;
+        runGoogleScriptSilent('apiUpdateReservation', payload)
+          .then(res => { if (!res.success) throw new Error(res.message || '저장 실패'); })
+          .catch(e => {
+            if (target && listSnapshot) Object.assign(target, listSnapshot);
+            if (modalState.reservation && activeReservation.value && activeReservation.value.id === payload.id && listSnapshot) {
+              activeReservation.value = JSON.parse(JSON.stringify(listSnapshot));
+              originalReservation.value = prevOriginal;
+            }
+            showCustomAlert("저장 실패", "서버 저장에 실패하여 변경 전 상태로 되돌렸습니다.\n" + e.message);
+          })
+          .finally(() => { isMutating.value = false; });
       };
       
       const sendCustomMail = async () => {
@@ -858,7 +861,7 @@
               }
             };
             const res = await runGoogleScriptSilent('apiSendTemplatedMail', payload);
-            if (res.success) { showCustomAlert("성공", "발송됨"); runGoogleScriptSilent('apiMarkReservationAsRead', activeReservation.value.id); } 
+            if (res.success) { showCustomAlert("성공", "발송됨"); selectedMailTemplateId.value = ''; runGoogleScriptSilent('apiMarkReservationAsRead', activeReservation.value.id); }
             else showCustomAlert("실패", res.message);
           } catch (e) { showCustomAlert("오류", e.message); }
           finally { isModalLoading.value = false; }
@@ -1051,6 +1054,40 @@
         }
       }, { deep: true });
 
+      // [Optimistic] 슬롯 저장 시 로컬 메모리(slotDefaults/slotOverrides)에 즉시 반영
+      const applySlotOptimistic = (apiType, d) => {
+        const upsertOverride = (branchId, masterId, dateStr, slot, enabled, reason) => {
+          const ov = slotOverrides.value.find(o =>
+            o.branch_id === branchId &&
+            String(o.slot_master_id) === String(masterId) &&
+            Util.formatDate(o.date, 'date') === dateStr
+          );
+          if (ov) {
+            ov.slot = Number(slot);
+            ov.enabled = enabled;
+            if (reason !== undefined) ov.reason = reason;
+          } else {
+            slotOverrides.value.push({ id: null, branch_id: branchId, slot_master_id: masterId, date: dateStr, slot: Number(slot), enabled: enabled, reason: reason || '' });
+          }
+        };
+
+        if (apiType === 'slot_override') {
+          upsertOverride(d.branch_id, d.slot_master_id, d.date, d.slot, d.enabled, d.reason);
+        } else if (apiType === 'slot_override_batch') {
+          Object.keys(d.payload).forEach(mid => {
+            const v = d.payload[mid];
+            upsertOverride(d.branch_id, mid, d.date, v.slot, v.enabled);
+          });
+        } else if (apiType === 'slot_batch') {
+          Object.keys(d.payload).forEach(mid => {
+            const v = d.payload[mid];
+            const def = slotDefaults.value.find(x => x.branch_id === d.branch_id && String(x.slot_master_id) === String(mid));
+            if (def) { def.slot = Number(v.slot); def.enabled = v.enabled; }
+            else slotDefaults.value.push({ branch_id: d.branch_id, slot_master_id: mid, slot: Number(v.slot), enabled: v.enabled });
+          });
+        }
+      };
+
       const handleSystemSave = async () => {
         let d = localData.value;
         let type = activeSystemData.value.type;
@@ -1075,10 +1112,31 @@
           }
         }
         
+        const isSlotSave = apiType === 'slot_override' || apiType === 'slot_batch' || apiType === 'slot_override_batch';
+        if (isSlotSave) {
+          const defaultsSnapshot = JSON.parse(JSON.stringify(slotDefaults.value));
+          const overridesSnapshot = JSON.parse(JSON.stringify(slotOverrides.value));
+
+          applySlotOptimistic(apiType, d);
+          closeModal('system');
+          showCustomAlert("저장 요청 완료", "변경사항이 관리자 화면에 즉시 반영되었습니다.\n\n실제 예약 사이트(위젯 캘린더)에는 반영되는 데 최대 몇 분이 걸릴 수 있습니다. 잠시 후 예약 사이트에 직접 접속하여 슬롯 상태가 정상 반영되었는지 확인해주세요.\n\n서버 저장에 실패할 경우 화면은 자동으로 변경 전 상태로 되돌아갑니다.");
+
+          isMutating.value = true;
+          runGoogleScriptSilent('apiSaveSystemSettings', apiType, d)
+            .then(res => { if (!res.success) throw new Error(res.message || '저장 실패'); })
+            .catch(e => {
+              slotDefaults.value = defaultsSnapshot;
+              slotOverrides.value = overridesSnapshot;
+              showCustomAlert("저장 실패", "슬롯 저장에 실패하여 변경 전 상태로 되돌렸습니다.\n" + e.message);
+            })
+            .finally(() => { isMutating.value = false; });
+          return;
+        }
+
         isModalLoading.value = true;
         try {
           const res = await runGoogleScriptSilent('apiSaveSystemSettings', apiType, d);
-          if (res.success) { showCustomAlert("완료", "저장됨"); await refreshInitialData(); closeModal('system'); } 
+          if (res.success) { showCustomAlert("완료", "저장됨"); await refreshInitialData(); closeModal('system'); }
           else showCustomAlert("오류", res.message);
         } catch(e) {
           showCustomAlert("오류", e.message);
@@ -1342,7 +1400,7 @@
         isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid,
         handleSaveReservation, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder, 
         renderPreview, isPreviewMode, togglePreview,
-        BASE_WEBAPP_URL
+        BASE_WEBAPP_URL, appVersion
       };
     }
   }).mount('#app');

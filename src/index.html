@@ -37,17 +37,17 @@
 
 <body class="bg-gray-100 text-gray-800 font-sans text-sm h-screen overflow-hidden">
 
-  <div id="app" class="h-full flex flex-col relative" data-app-url="<?!= BASE_WEBAPP_URL ?>" v-cloak>
+  <div id="app" class="h-full flex flex-col relative" data-app-url="<?!= BASE_WEBAPP_URL ?>" data-app-version="<?!= APP_VERSION ?>" v-cloak>
 
-    <!-- A. Global Spinner (초기 로딩 & API 요청 중) -->
+    <!-- A. Global Spinner (반투명 오버레이: 뒤 화면이 비쳐 보이도록 처리) -->
     <div v-if="isLoading"
-      class="absolute inset-0 z-[9999] bg-white bg-opacity-90 flex flex-col items-center justify-center">
+      class="absolute inset-0 z-[9999] bg-white/60 backdrop-blur-[2px] flex flex-col items-center justify-center">
       <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-red-800 mb-4"></div>
       <p class="text-lg font-bold text-gray-700 animate-pulse">{{ loadingMessage }}</p>
     </div>
 
     <!-- B. Access Denied Screen (Component) -->
-    <div v-else-if="appState === 'denied'" class="h-full">
+    <div v-if="appState === 'denied'" class="h-full">
       <?!= include('ViewDenied'); ?>
     </div>
 

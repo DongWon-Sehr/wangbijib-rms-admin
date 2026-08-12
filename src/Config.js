@@ -2,6 +2,9 @@
  * [Config] 전역 설정 및 상수 관리 (Singleton)
  */
 const Config = {
+  // 0. App Version (source of truth: package.json — scripts/sync-version.js가 자동 주입)
+  APP_VERSION: '2.0.76',
+
   // 1. Spreadsheet ID
   SPREADSHEET_ID: SpreadsheetApp.getActiveSpreadsheet().getId(),
 
