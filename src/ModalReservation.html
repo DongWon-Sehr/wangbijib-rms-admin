@@ -144,24 +144,36 @@
             </div>
           </div>
           
-          <!-- Email (Editable) -->
+          <!-- Email (Editable + Copy) -->
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">고객 이메일</label>
-            <input
-              type="email"
-              v-model="activeReservation.email"
-              class="w-full border border-gray-300 rounded-lg p-2.5 bg-white focus:ring-primary-500 focus:border-primary-500"
-            >
+            <div class="relative">
+              <input
+                type="email"
+                v-model="activeReservation.email"
+                class="w-full border border-gray-300 rounded-lg p-2.5 pr-10 bg-white focus:ring-primary-500 focus:border-primary-500"
+              >
+              <button type="button" @click="copyToClipboard(activeReservation.email)" title="이메일 복사"
+                class="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-primary-600 transition">
+                <i class="ph ph-copy text-lg"></i>
+              </button>
+            </div>
           </div>
 
-          <!-- Phone Number (Editable) -->
+          <!-- Phone Number (Editable + Copy) -->
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">고객 연락처</label>
-            <input
-              type="text"
-              v-model="activeReservation.phone_number"
-              class="w-full border border-gray-300 rounded-lg p-2.5 bg-white focus:ring-primary-500 focus:border-primary-500"
-            >
+            <div class="relative">
+              <input
+                type="text"
+                v-model="activeReservation.phone_number"
+                class="w-full border border-gray-300 rounded-lg p-2.5 pr-10 bg-white focus:ring-primary-500 focus:border-primary-500"
+              >
+              <button type="button" @click="copyToClipboard(activeReservation.phone_number)" title="연락처 복사"
+                class="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-primary-600 transition">
+                <i class="ph ph-copy text-lg"></i>
+              </button>
+            </div>
           </div>
           
           <!-- Notes (Readonly) -->
@@ -246,7 +258,13 @@
               </select>
             </div>
             <div class="text-xs text-gray-500 mt-2 flex items-center justify-between gap-2">
-              <span class="min-w-0 truncate">* 메일 발송 시 스레드 ID: {{ activeReservation.email_thread_id || '미확보' }}</span>
+              <span class="min-w-0 flex items-center gap-1">
+                <span class="truncate">* 메일 발송 시 스레드 ID: {{ activeReservation.email_thread_id || '미확보' }}</span>
+                <button v-if="activeReservation.email_thread_id" type="button" @click="copyToClipboard(activeReservation.email_thread_id)" title="스레드 ID 복사"
+                  class="p-0.5 text-gray-400 hover:text-primary-600 transition flex-shrink-0">
+                  <i class="ph ph-copy text-sm"></i>
+                </button>
+              </span>
               <button
                 @click="initializeMailThread"
                 type="button"

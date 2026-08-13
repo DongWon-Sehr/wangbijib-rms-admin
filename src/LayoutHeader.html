@@ -15,26 +15,29 @@
           <h1 class="text-xl font-bold tracking-wider hidden sm:flex items-baseline gap-1.5">왕비집 예약 시스템
             <span class="text-xs text-primary-200 font-mono font-normal">v{{ appVersion }}</span>
           </h1>
-          <h1 class="text-lg font-bold tracking-wide sm:hidden whitespace-nowrap">왕비집 예약</h1>
+          <div class="sm:hidden leading-tight">
+            <p class="text-[9px] text-primary-200 font-mono">v{{ appVersion }}</p>
+            <h1 class="text-lg font-bold tracking-wide whitespace-nowrap">왕비집 예약</h1>
+          </div>
           <p class="text-[10px] text-primary-200 font-medium tracking-widest hidden sm:block">PREMIUM DINING RESERVATION</p>
         </div>
       </a>
     </div>
 
     <!-- 2. Right: Tabs & User Profile -->
-    <div class="flex items-center space-x-1 sm:space-x-3 md:space-x-4 flex-shrink-0">
+    <div class="flex items-center space-x-0.5 sm:space-x-3 md:space-x-4 flex-shrink-0">
 
       <!-- Sync Countdown UI -->
       <div v-if="currentUser" @click="handleManualRefresh" class="flex items-center bg-primary-900/40 hover:bg-primary-800/60 cursor-pointer transition-colors px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-primary-100 text-[10px] sm:text-xs font-bold border border-primary-800 shadow-inner" title="새로고침 (클릭 시 즉시 동기화)">
         <i class="ph ph-arrows-clockwise mr-1 sm:mr-1.5 text-xs sm:text-sm" :class="{ 'animate-spin text-amber-400': isSyncing || syncCountdown === 60 }"></i>
-        <span class="w-3 sm:w-4 text-center tabular-nums">{{ isSyncing ? '-' : syncCountdown }}</span>s
+        <span class="w-3 sm:w-4 text-center tabular-nums">{{ isSyncing ? '-' : syncCountdown }}</span><span class="ml-0.5">s</span>
       </div>
 
       <!-- Notification Icon & Dropdown -->
       <div v-if="currentUser" class="relative">
         <button
           @click="toggleNotificationDropdown"
-          class="flex items-center justify-center p-2 rounded-full hover:bg-primary-700/50 transition relative focus:outline-none border border-transparent hover:border-primary-600/30"
+          class="flex items-center justify-center p-1.5 sm:p-2 rounded-full hover:bg-primary-700/50 transition relative focus:outline-none border border-transparent hover:border-primary-600/30"
           title="알림 확인"
         >
           <i class="ph ph-bell text-xl sm:text-2xl text-primary-100"></i>
@@ -244,7 +247,7 @@
       </div>
 
       <!-- Mobile Menu Button (Hamburger) -->
-      <button class="md:hidden p-2.5 rounded-lg hover:bg-primary-700 transition text-white focus:outline-none focus:ring-2 focus:ring-primary-400" @click="toggleMobileMenu">
+      <button class="md:hidden p-1.5 rounded-lg hover:bg-primary-700 transition text-white focus:outline-none focus:ring-2 focus:ring-primary-400" @click="toggleMobileMenu">
           <i class="ph ph-list text-2xl"></i>
       </button>
 
