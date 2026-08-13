@@ -1,13 +1,13 @@
 <!-- LayoutHeader.html (GAS include용 템플릿) -->
 <header class="bg-primary-800 text-white shadow-lg sticky top-0 z-40">
-  <div class="container mx-auto px-4 py-3 flex items-center justify-between">
+  <div class="container mx-auto px-2 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between">
 
     <!-- 1. Left: Logo & Title -->
-    <div class="flex items-center space-x-4 cursor-pointer hover:opacity-90 transition-opacity"
+    <div class="flex items-center space-x-2 sm:space-x-4 cursor-pointer hover:opacity-90 transition-opacity min-w-0"
       @click="setCurrentView('list')">
       <a :href="BASE_WEBAPP_URL"
         class="flex items-center gap-2 cursor-pointer no-underline text-current">
-        <img v-if="appLogo" :src="appLogo" alt="왕비집 BI" class="h-14 w-auto object-contain">
+        <img v-if="appLogo" :src="appLogo" alt="왕비집 BI" class="h-10 sm:h-14 w-auto object-contain flex-shrink-0">
         <div v-else class="bg-white p-1 rounded-full bg-opacity-10">
           <i class="ph ph-crown-simple text-3xl text-amber-400"></i>
         </div>
@@ -15,14 +15,14 @@
           <h1 class="text-xl font-bold tracking-wider hidden sm:flex items-baseline gap-1.5">왕비집 예약 시스템
             <span class="text-xs text-primary-200 font-mono font-normal">v{{ appVersion }}</span>
           </h1>
-          <h1 class="text-xl font-bold tracking-wider sm:hidden">왕비집 예약</h1>
+          <h1 class="text-lg font-bold tracking-wide sm:hidden whitespace-nowrap">왕비집 예약</h1>
           <p class="text-[10px] text-primary-200 font-medium tracking-widest hidden sm:block">PREMIUM DINING RESERVATION</p>
         </div>
       </a>
     </div>
 
     <!-- 2. Right: Tabs & User Profile -->
-    <div class="flex items-center space-x-3 md:space-x-4">
+    <div class="flex items-center space-x-1 sm:space-x-3 md:space-x-4 flex-shrink-0">
 
       <!-- Sync Countdown UI -->
       <div v-if="currentUser" @click="handleManualRefresh" class="flex items-center bg-primary-900/40 hover:bg-primary-800/60 cursor-pointer transition-colors px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-primary-100 text-[10px] sm:text-xs font-bold border border-primary-800 shadow-inner" title="새로고침 (클릭 시 즉시 동기화)">
