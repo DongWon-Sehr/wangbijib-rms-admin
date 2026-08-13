@@ -105,6 +105,30 @@
         isOpen: false, title: '', message: '', isConfirm: false, resolve: null
       });
 
+      // 클립보드 복사 (iframe 환경 대비 execCommand 폴백 포함)
+      const copyToClipboard = async (text) => {
+        if (!text) return;
+        const value = String(text);
+        try {
+          await navigator.clipboard.writeText(value);
+          showToast('클립보드에 복사되었습니다');
+        } catch (e) {
+          const ta = document.createElement('textarea');
+          ta.value = value;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try {
+            document.execCommand('copy');
+            showToast('클립보드에 복사되었습니다');
+          } catch (e2) {
+            showCustomAlert('오류', '복사에 실패했습니다.');
+          }
+          document.body.removeChild(ta);
+        }
+      };
+
       // 셀 호버 툴팁 (truncate된 풀 텍스트 즉시 표시, fixed 렌더링이라 overflow 클리핑 없음)
       const cellTip = reactive({ show: false, text: '', x: 0, y: 0 });
       const showCellTip = (e, text) => {
@@ -1596,7 +1620,7 @@
         // [MODIFIED] Added create mode support (null arg)
         openMailTemplateModal: (t = null) => openModal('mail', { type: 'mail', mode: t ? 'edit' : 'create', data: t }),
         localDateTime, selectedMailTemplateId, selectedAltBranchId, selectedTemplateNeedsAltBranch, altBranchOptions, localData, userBranchIds, slotBatchPayload, localMailData, availableKeywords, modalTitle, 
-        isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid, isReservationDirty, isSystemDirty, isMailDirty, toast, cellTip, showCellTip, hideCellTip,
+        isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid, isReservationDirty, isSystemDirty, isMailDirty, toast, cellTip, showCellTip, hideCellTip, copyToClipboard,
         handleSaveReservation, isStatusDropdownOpen, toggleStatusDropdown, setReservationStatus, depositAmountDisplay, handleDepositAmountInput, handleDepositAmountKeydown, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder,
         renderPreview, isPreviewMode, togglePreview,
         BASE_WEBAPP_URL, appVersion, appLogo

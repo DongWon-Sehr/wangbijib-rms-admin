@@ -27,6 +27,15 @@
     background: #a8a8a8; 
   }
 
+  /* 모달/리스트 스크롤 영역: 터치 제스처를 세로로만 제한 (좌우 스와이프 시 콘텐츠 움찔거림 방지) */
+  .custom-scrollbar,
+  #mobile-scroll-container,
+  .notification-scroll-container {
+    touch-action: pan-y;
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
+
   /* --- Transitions --- */
   .modal-enter-active, .modal-leave-active {
     transition: opacity 0.2s ease;
