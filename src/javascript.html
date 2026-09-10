@@ -23,18 +23,32 @@
   const { createApp, ref, computed, onMounted, onUnmounted, reactive, toRefs, watch, nextTick, getCurrentInstance } = Vue;
 
   // --- Client-side Utilities ---
+  // All dates are interpreted/displayed in the app's fixed timezone (KST), regardless of browser timezone
+  const APP_TZ_OFFSET_HOURS = 9;
+  const APP_TZ_OFFSET_MS = APP_TZ_OFFSET_HOURS * 60 * 60 * 1000;
+  const APP_TZ_SUFFIX = '+09:00';
+
   const Util = {
+    TZ_OFFSET_MS: APP_TZ_OFFSET_MS,
+    TZ_SUFFIX: APP_TZ_SUFFIX,
+    parseInAppTz: function(dateStr, timeStr) {
+      return Date.parse(dateStr + 'T' + (timeStr || '00:00') + ':00' + APP_TZ_SUFFIX);
+    },
     formatDate: function(value, type) {
       if (!type) type = 'datetime';
       if (!value) return '';
       try {
-        const date = new Date(value);
-        if (isNaN(date.getTime())) return String(value);
-        const y = date.getFullYear();
-        const m = String(date.getMonth() + 1).padStart(2, '0');
-        const d = String(date.getDate()).padStart(2, '0');
-        const hh = String(date.getHours()).padStart(2, '0');
-        const mm = String(date.getMinutes()).padStart(2, '0');
+        if (typeof value === 'string' && /^\d{2}:\d{2}(:\d{2})?$/.test(value)) {
+          return type === 'time' ? value.slice(0, 5) : String(value);
+        }
+        const parsed = new Date(value);
+        if (isNaN(parsed.getTime())) return String(value);
+        const date = new Date(parsed.getTime() + APP_TZ_OFFSET_MS);
+        const y = date.getUTCFullYear();
+        const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(date.getUTCDate()).padStart(2, '0');
+        const hh = String(date.getUTCHours()).padStart(2, '0');
+        const mm = String(date.getUTCMinutes()).padStart(2, '0');
         
         if (type === 'date') return y + '-' + m + '-' + d;
         if (type === 'time') return hh + ':' + mm;
@@ -43,9 +57,7 @@
       } catch (e) { return String(value); }
     },
     addDays: function(date, days) {
-      const result = new Date(date);
-      result.setDate(result.getDate() + days);
-      return result;
+      return new Date(new Date(date).getTime() + days * 24 * 60 * 60 * 1000);
     },
     safeChar: function(str, index) {
       if (!index) index = 0;
@@ -506,14 +518,12 @@
         
         const dateCol = filterDateType.value;
         if (filterDateStart.value) {
-          const start = new Date(filterDateStart.value).setHours(0,0,0,0);
+          const start = Util.parseInAppTz(filterDateStart.value);
           list = list.filter(r => r[dateCol] && new Date(r[dateCol]).getTime() >= start);
         }
         if (filterDateEnd.value) {
-          const end = new Date(filterDateEnd.value);
-          end.setDate(end.getDate() + 1);
-          end.setHours(0,0,0,0);
-          list = list.filter(r => r[dateCol] && new Date(r[dateCol]).getTime() < end.getTime());
+          const end = Util.parseInAppTz(filterDateEnd.value) + 24 * 60 * 60 * 1000;
+          list = list.filter(r => r[dateCol] && new Date(r[dateCol]).getTime() < end);
         }
 
         const k = sortKey.value;
@@ -657,7 +667,7 @@
       const clearBranchFilters = () => filterBranchIds.value = [];
       const prevPage = () => { if (currentPage.value > 1) currentPage.value--; };
       const nextPage = () => { if (currentPage.value < totalPage.value) currentPage.value++; };
-      const changeSlotDate = (d) => { const dt = new Date(currentSlotDate.value); dt.setDate(dt.getDate() + d); currentSlotDate.value = Util.formatDate(dt, 'date'); };
+      const changeSlotDate = (d) => { currentSlotDate.value = Util.formatDate(Util.addDays(new Date(currentSlotDate.value), d), 'date'); };
       
       const markAsReadOnClick = (res) => {
         if (res && res.is_read === false) {
@@ -952,7 +962,7 @@
         const payload = createUpdatePayload(d);
         payload.visit_date = localDateTime.date;
         payload.visit_time = localDateTime.time;
-        const newDateIso = new Date(payload.visit_date + ' ' + payload.visit_time).toISOString();
+        const newDateIso = new Date(Util.parseInAppTz(payload.visit_date, payload.visit_time)).toISOString();
 
         const target = reservations.value.find(r => r.id === d.id);
         const listSnapshot = target ? JSON.parse(JSON.stringify(target)) : null;
