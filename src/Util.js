@@ -54,11 +54,14 @@ const Util = {
       headers.forEach((header, index) => {
         let val = row[index];
         
-        // Date 객체는 ISO 문자열로 변환 (프론트엔드 전송용)
         if (val instanceof Date) {
-          // 유효한 날짜인지 확인
           if (!isNaN(val.getTime())) {
-            val = val.toISOString();
+            // Time-only sheet values are 1899-based Dates; ISO/UTC breaks them (pre-1912 Seoul LMT +08:27:52), so send wall-clock "HH:mm"
+            if (val.getFullYear() < 1970) {
+              val = Utilities.formatDate(val, Session.getScriptTimeZone(), 'HH:mm');
+            } else {
+              val = val.toISOString();
+            }
           } else {
             val = '';
           }
