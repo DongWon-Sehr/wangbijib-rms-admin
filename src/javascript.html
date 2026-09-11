@@ -105,6 +105,25 @@
       const isMobileMenuOpen = ref(false);
       const now = ref(new Date());
       const logoutUrl = 'https://accounts.google.com/logout';
+
+      // Squarespace order admin for deposit refunds; per-device targets.
+      // Mobile can only launch the app, not route into it: the app has no universal links,
+      // and its squarespace-app:// scheme ignores paths and url params (verified on-device).
+      // - android: launcher intent opens the installed app, falls back to Play Store
+      // - ios: undocumented squarespace-app:// scheme; no-op if the app is not installed
+      const REFUND_ORDER_URLS = {
+        desktop: 'https://piccolo-algae-tkjr.squarespace.com/config/commerce/orders',
+        android: 'intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=com.squarespace.android.squarespaceapp;S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.squarespace.android.squarespaceapp;end',
+        ios: 'squarespace-app://'
+      };
+      // iPadOS reports as Macintosh; touch support tells it apart from desktop Safari
+      const isRefundIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+      const refundOrderUrl = isRefundIOS ? REFUND_ORDER_URLS.ios
+        : (/Android/i.test(navigator.userAgent) ? REFUND_ORDER_URLS.android : REFUND_ORDER_URLS.desktop);
+      // scheme navigation needs the anchor's own frame; inside the GAS sandboxed iframe an explicit
+      // target (even _self) blocks it on iOS - so render no target attribute at all. Everything else opens a tab.
+      // No install fallback on iOS: a missing app just shows the OS "invalid address" error.
+      const refundTarget = isRefundIOS ? null : '_blank';
       const CALENDAR_URL = "https://calendar.google.com/calendar/embed?&wkst=2&ctz=Asia%2FSeoul&hl=ko&title=%EC%99%95%EB%B9%84%EC%A7%91%20%EC%98%88%EC%95%BD%20%EC%BA%98%EB%A6%B0%EB%8D%94&showPrint=0&showTz=0&src=MmZiMTNkYzIyMDczM2Y3Y2U2MWJhMmFiMjM2NmY1YjQ3OWFhMmQyYjhkN2EzNGE3NzZlZWE3YzQyMDcxMjhkY0Bncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=ZDE4YTZhMTMyNDhkOWE1MTI2N2M4OTgyZTcwNjE3NGI3MDI4YjVjNmFhOGU3NGE5NDUzZDNjOGQ1OWYyOTI1YUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=ZTZkMzY3NjQ3ZGU5ZTQzODUyYTBlNjE3OTljYmU4N2FjYmMwZjRmYjdhMmJmMTFlMzMyY2RiZTg3NTU1MDZkNEBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=OTkxODFlMzc5YjdmZTBkMzY5NjJjODc5MzcyODQ1ZTBkMDBjMmU4YmE4ZWM4ZjNmYTQzZjZhMThkZWVlYjVhYUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=YmE5NmExOGRjZWVjNzZiODcwZWIzYWY5OWM2NjUwOTJmNzA1MGY3M2FlMWM2NDJjZmRmYWVmYmNiYjMzNmYxOUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=YTM4MGRjNTBmMjEyN2RlMmI5MzlmODcxNTU4MzUzMTZjNWQxMDBkNTk4MmZkMTEzZmM3NTI4ZWZhNzlhOGJkMUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&color=%23ef6c00&color=%237cb342&color=%238e24aa&color=%239e69af&color=%23ef6c00&color=%23c0ca33";
 
       const modalState = reactive({
@@ -1603,7 +1622,7 @@
         pullDistance, isPulling, isRefreshing, handleTouchStart, handleTouchMove, handleTouchEnd,
         pullThresholdReached, pullIndicatorHeight, hasMultiplePages,
         isLoading, loadingMessage, appState, deniedMessage, currentView, currentUser, isModalLoading, syncCountdown, isSyncing,
-        isProfileDropdownOpen, isNotificationOpen, isMutating, isMobileMenuOpen, logoutUrl, modalState, alertModal,
+        isProfileDropdownOpen, isNotificationOpen, isMutating, isMobileMenuOpen, logoutUrl, refundOrderUrl, refundTarget, modalState, alertModal,
         activeReservation, activeSystemData,
         reservations, branches, users, mailTemplates, slotMasters, slotDefaults, slotOverrides,
         filterText, filterStatus, filterDeposit, filterBranchIds, filterDateType, filterDateStart, filterDateEnd,
