@@ -301,6 +301,80 @@ const DuplicateGroupService = {
   },
 
   /**
+   * [Action] 특정 중복 그룹에서 단일 예약 제외
+   * @param {string} groupId
+   * @param {string} reservationId
+   */
+  excludeReservationFromGroup(groupId, reservationId) {
+    try {
+      const sheet = this._getSheet();
+      if (!sheet) {
+        throw new Error(`'${Config.SHEET_NAMES.DUPLICATE_GROUP}' 시트가 존재하지 않습니다.`);
+      }
+
+      const allData = sheet.getDataRange().getValues();
+      if (allData.length <= 1) {
+        return Util.createResponse(true, null, '제외 완료');
+      }
+
+      const grpIdx = allData[0].indexOf('group_id');
+      const resIdx = allData[0].indexOf('reservation_id');
+      if (grpIdx === -1 || resIdx === -1) {
+        throw new Error('group_id 또는 reservation_id 컬럼을 찾을 수 없습니다.');
+      }
+
+      const rowsToDelete = [];
+      let remainingGroupRowsCount = 0;
+
+      for (let i = 1; i < allData.length; i++) {
+        const gid = String(allData[i][grpIdx]).trim();
+        const rid = String(allData[i][resIdx]).trim();
+        if (gid === String(groupId).trim()) {
+          if (rid === String(reservationId).trim()) {
+            rowsToDelete.push(i + 1);
+          } else {
+            remainingGroupRowsCount++;
+          }
+        }
+      }
+
+      // 해당 예약 행 삭제 (역순)
+      for (let k = rowsToDelete.length - 1; k >= 0; k--) {
+        sheet.deleteRow(rowsToDelete[k]);
+      }
+
+      // 그룹 내 남은 예약이 1건 이하인 경우, 그룹 해제(삭제)하여 단독 예약 중복 고아 방지
+      if (remainingGroupRowsCount <= 1) {
+        const freshData = sheet.getDataRange().getValues();
+        const orphanRows = [];
+        for (let i = 1; i < freshData.length; i++) {
+          if (String(freshData[i][grpIdx]).trim() === String(groupId).trim()) {
+            orphanRows.push(i + 1);
+          }
+        }
+        for (let k = orphanRows.length - 1; k >= 0; k--) {
+          sheet.deleteRow(orphanRows[k]);
+        }
+      }
+
+      // 제외된 예약은 개별 CLEARED로 기록하여 향후 자동 배치 재묶임 방지
+      this.saveGroup({
+        group_id: `cleared_${reservationId}`,
+        id: `cleared_${reservationId}`,
+        reservation_ids: [reservationId],
+        group_type: Config.DUPLICATE_GROUP_TYPE.AUTO,
+        status: Config.DUPLICATE_GROUP_STATUS.CLEARED
+      });
+
+      console.log(`[DuplicateGroupService] 그룹(${groupId})에서 예약(${reservationId}) 제외 완료`);
+      return Util.createResponse(true, { groupId: groupId, reservationId: reservationId }, '중복 그룹에서 제외되었습니다.');
+    } catch (e) {
+      console.log(`[DuplicateGroupService] excludeReservationFromGroup Error: ${e.message}`);
+      return Util.createResponse(false, null, e.message);
+    }
+  },
+
+  /**
    * [Action] 중복 안내 메일 발송 일시 기록
    * @param {string} groupId
    * @param {Array<string>} reservationIds

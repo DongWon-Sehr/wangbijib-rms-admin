@@ -549,14 +549,23 @@
         const resMap = {};
         allRes.forEach(r => { resMap[r.id] = r; });
 
+        // 개별/전체 중복아님(cleared) 처리된 예약 ID 집합 수집
+        const clearedResIds = new Set();
+        groupsData.forEach(g => {
+          if (g.status === 'cleared') {
+            const pIds = g.parsed_ids || (g.reservation_ids ? String(g.reservation_ids).split(',').map(s => s.trim()).filter(Boolean) : []);
+            pIds.forEach(id => clearedResIds.add(id));
+          }
+        });
+
         const finalGroups = [];
 
         groupsData.forEach(g => {
           if (g.status !== 'active') return;
 
           const pIds = g.parsed_ids || (g.reservation_ids ? String(g.reservation_ids).split(',').map(s => s.trim()).filter(Boolean) : []);
-          // 취소(cancel)되지 않은 유효 예약만 필터링 (Optimistic UI 즉시 반영)
-          const validMembers = pIds.map(id => resMap[id]).filter(r => r && r.status !== 'cancel');
+          // 취소(cancel)되지 않고, 개별 중복아님(cleared) 처리되지 않은 유효 예약만 필터링 (Optimistic UI 즉시 반영)
+          const validMembers = pIds.map(id => resMap[id]).filter(r => r && r.status !== 'cancel' && !clearedResIds.has(r.id));
 
           // 남은 유효 예약이 2건 이상인 경우만 중복 그룹으로 표시
           if (validMembers.length >= 2) {
@@ -1448,37 +1457,47 @@
       };
 
       // --- 중복 의심 및 수동 그룹 핸들러 ---
-      const excludeSingleReservationFromGroup = async (res) => {
-        const group = activeReservationDuplicateGroup.value;
-        if (!group) return;
-        const confirmed = await showCustomConfirm('중복 제외', `${res.customer_name} 건을 중복 그룹에서 제외하시겠습니까?`);
+      const excludeSingleReservationFromGroup = async (res, group = null) => {
+        const targetGroup = group || activeReservationDuplicateGroup.value || (duplicateGroups.value || []).find(g => (g.reservations || []).some(r => r.id === res.id));
+        if (!targetGroup) return;
+        const confirmed = await showCustomConfirm('중복 제외', `[${res.customer_name}] 건을 중복 그룹에서 제외하시겠습니까?`);
         if (!confirmed) return;
+
+        // [Snapshot] 서버 실패 시 롤백을 위한 스냅샷
+        const snapshot = JSON.parse(JSON.stringify(duplicateGroupsData.value || []));
+
         try {
           isMutating.value = true;
-          if (group.group_type === 'manual') {
-            const remaining = group.reservations.filter(r => r.id !== res.id);
-            const remainingIds = remaining.map(r => r.id);
-            if (remainingIds.length < 2) {
-              await runGoogleScriptSilent('apiRemoveManualDuplicateGroup', { groupId: group.id });
-            } else {
-              const earliestTime = Math.min(...remaining.map(r => new Date(r.reservation_date).getTime() || 0));
-              const earliestDate = earliestTime && !isNaN(earliestTime) ? new Date(earliestTime) : new Date();
-              await runGoogleScriptSilent('apiCreateManualDuplicateGroup', { 
-                reservationIds: remainingIds, 
-                earliestDate: earliestDate
-              });
+
+          // [Optimistic UI] 즉시 로컬 메모리에서 해당 예약을 제외
+          const gData = (duplicateGroupsData.value || []).find(g => g.group_id === targetGroup.id || g.id === targetGroup.id);
+          if (gData) {
+            if (gData.parsed_ids) gData.parsed_ids = gData.parsed_ids.filter(id => id !== res.id);
+            if (gData.reservation_ids) {
+              const ids = Array.isArray(gData.reservation_ids) ? gData.reservation_ids : String(gData.reservation_ids).split(',');
+              gData.reservation_ids = ids.map(s => s.trim()).filter(id => id && id !== res.id);
             }
-          } else {
-            await runGoogleScriptSilent('apiClearDuplicateGroup', {
-              groupId: `cleared_${res.id}`,
-              reservationIds: [res.id],
-              earliestDate: res.reservation_date || new Date()
-            });
           }
+          // cleared 예약 목록에도 낙관적 추가
+          duplicateGroupsData.value.push({
+            id: `cleared_${res.id}`,
+            group_id: `cleared_${res.id}`,
+            reservation_ids: [res.id],
+            parsed_ids: [res.id],
+            status: 'cleared'
+          });
+          duplicateGroupsData.value = [...duplicateGroupsData.value];
+
+          await runGoogleScriptSilent('apiExcludeReservationFromGroup', {
+            groupId: targetGroup.id,
+            reservationId: res.id
+          });
           showToast('중복 그룹에서 제외되었습니다');
           await refreshInitialData(true);
         } catch (e) {
-          showCustomAlert('오류', e.message);
+          // [Rollback] 서버 오류 시 즉시 이전 상태로 복구
+          duplicateGroupsData.value = snapshot;
+          showCustomAlert('오류', `중복 제외 처리에 실패하여 원래대로 복구되었습니다.\n${e.message}`);
         } finally {
           isMutating.value = false;
         }
@@ -1486,22 +1505,35 @@
 
       const clearDuplicateGroup = async (group) => {
         if (!group) return;
-        const confirmed = await showCustomConfirm('중복 아님 처리', '해당 예약들을 중복이 아닌 것으로 처리하시겠습니까? (이후 알림에서 제외됩니다)');
+        const confirmed = await showCustomConfirm('전체 중복아님 처리', '해당 예약들을 중복이 아닌 것으로 처리하시겠습니까? (이후 알림에서 제외됩니다)');
         if (!confirmed) return;
+
+        // [Snapshot] 서버 실패 시 롤백을 위한 스냅샷
+        const snapshot = JSON.parse(JSON.stringify(duplicateGroupsData.value || []));
+
         try {
           isMutating.value = true;
           const resIds = (group.reservations || []).map(r => r.id);
-          const earliestTime = Math.min(...(group.reservations || []).map(r => new Date(r.reservation_date).getTime() || 0));
-          const earliestDate = earliestTime && !isNaN(earliestTime) ? new Date(earliestTime) : new Date();
+          const earliestDateStr = group.reservations?.[0]?.reservation_date ? String(group.reservations[0].reservation_date).slice(0, 10) : new Date().toISOString().slice(0, 10);
+
+          // [Optimistic UI] 즉시 해당 그룹을 로컬에서 cleared 상태로 전환
+          const gData = (duplicateGroupsData.value || []).find(g => g.group_id === group.id || g.id === group.id);
+          if (gData) {
+            gData.status = 'cleared';
+          }
+          duplicateGroupsData.value = [...duplicateGroupsData.value];
+
           await runGoogleScriptSilent('apiClearDuplicateGroup', {
             groupId: group.id,
             reservationIds: resIds,
-            earliestDate: earliestDate
+            earliestDate: earliestDateStr
           });
           showToast('중복 아님 처리되었습니다');
           await refreshInitialData(true);
         } catch (e) {
-          showCustomAlert('오류', e.message);
+          // [Rollback] 서버 오류 시 복구
+          duplicateGroupsData.value = snapshot;
+          showCustomAlert('오류', `전체 중복아님 처리에 실패하여 원래대로 복구되었습니다.\n${e.message}`);
         } finally {
           isMutating.value = false;
         }
@@ -1509,15 +1541,25 @@
 
       const handleRemoveManualGroup = async (group) => {
         if (!group) return;
-        const confirmed = await showCustomConfirm('수동 그룹 해제', '수동으로 묶인 중복 그룹을 해제하시겠습니까?');
+        const confirmed = await showCustomConfirm('수동 묶음 해제', '수동으로 묶인 중복 그룹을 해제하시겠습니까?');
         if (!confirmed) return;
+
+        // [Snapshot] 서버 실패 시 롤백을 위한 스냅샷
+        const snapshot = JSON.parse(JSON.stringify(duplicateGroupsData.value || []));
+
         try {
           isMutating.value = true;
+
+          // [Optimistic UI] 즉시 해당 그룹 로컬 제거
+          duplicateGroupsData.value = (duplicateGroupsData.value || []).filter(g => g.group_id !== group.id && g.id !== group.id);
+
           await runGoogleScriptSilent('apiRemoveManualDuplicateGroup', { groupId: group.id });
           showToast('수동 중복 그룹이 해제되었습니다');
           await refreshInitialData(true);
         } catch (e) {
-          showCustomAlert('오류', e.message);
+          // [Rollback] 서버 오류 시 복구
+          duplicateGroupsData.value = snapshot;
+          showCustomAlert('오류', `수동 그룹 해제에 실패하여 원래대로 복구되었습니다.\n${e.message}`);
         } finally {
           isMutating.value = false;
         }
@@ -1534,11 +1576,11 @@
           isMutating.value = true;
           const selectedRes = reservations.value.filter(r => selectedReservationIds.value.includes(r.id));
           const earliestTime = Math.min(...selectedRes.map(r => new Date(r.reservation_date).getTime() || 0));
-          const earliestDate = earliestTime && !isNaN(earliestTime) ? new Date(earliestTime) : new Date();
+          const earliestDateStr = earliestTime && !isNaN(earliestTime) ? new Date(earliestTime).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
 
           const res = await runGoogleScriptSilent('apiCreateManualDuplicateGroup', {
             reservationIds: selectedReservationIds.value,
-            earliestDate: earliestDate
+            earliestDate: earliestDateStr
           });
           if (res && res.success) {
             showToast('수동 중복 그룹이 생성되었습니다');

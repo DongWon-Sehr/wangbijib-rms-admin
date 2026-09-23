@@ -464,6 +464,13 @@ function apiRemoveManualDuplicateGroup(params) {
   }, params);
 }
 
+function apiExcludeReservationFromGroup(params) {
+  return _executeApi('apiExcludeReservationFromGroup', () => {
+    UserService.checkSession();
+    return DuplicateGroupService.excludeReservationFromGroup(params.groupId, params.reservationId);
+  }, params);
+}
+
 function apiMarkDuplicateMailSent(params) {
   return _executeApi('apiMarkDuplicateMailSent', () => {
     UserService.checkSession();

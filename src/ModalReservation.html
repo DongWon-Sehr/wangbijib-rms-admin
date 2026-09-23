@@ -121,7 +121,7 @@
           :title="activeReservationDuplicateGroup.mail_sent_at ? '중복확인 안내메일 재발송' : '중복확인 안내메일 발송'"
         >
           <i class="ph ph-paper-plane-tilt"></i>
-          <span>{{ activeReservationDuplicateGroup.mail_sent_at ? '확인메일 재발송' : '중복확인 메일' }}</span>
+          <span>{{ activeReservationDuplicateGroup.mail_sent_at ? '확인메일 재발송' : '확인메일 발송' }}</span>
         </button>
         <button
           type="button"
@@ -133,10 +133,11 @@
         </button>
         <button
           type="button"
-          @click="excludeSingleReservationFromGroup(activeReservation)"
-          class="px-2.5 py-1.5 text-xs text-gray-500 hover:text-purple-800 transition"
+          @click="excludeSingleReservationFromGroup(activeReservation, activeReservationDuplicateGroup)"
+          class="px-2.5 py-1.5 text-xs text-gray-500 hover:text-purple-800 transition flex items-center gap-1"
           title="이 예약만 중복 그룹에서 제외"
         >
+          <i class="ph ph-user-minus"></i>
           이 건 제외
         </button>
       </div>
