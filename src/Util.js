@@ -154,5 +154,20 @@ const Util = {
       'https://oauth2.googleapis.com/tokeninfo?id_token=' + idToken
     );
     return JSON.parse(res.getContentText());
+  },
+
+  /**
+   * 이메일 오타 정규화 (Config.EMAIL_TYPO_MAP 기반)
+   * @param {string} email
+   * @returns {string}
+   */
+  getNormalizedEmail(email) {
+    if (!email || typeof email !== 'string') return '';
+    const trimmed = email.trim().toLowerCase();
+    const parts = trimmed.split('@');
+    if (parts.length === 2 && Config.EMAIL_TYPO_MAP && Config.EMAIL_TYPO_MAP[parts[1]]) {
+      return `${parts[0]}@${Config.EMAIL_TYPO_MAP[parts[1]]}`;
+    }
+    return trimmed;
   }
 };

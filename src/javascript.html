@@ -129,7 +129,8 @@
       const modalState = reactive({
         reservation: false,
         system: false,
-        mail: false
+        mail: false,
+        duplicateMail: false
       });
       
       const alertModal = reactive({
@@ -192,11 +193,13 @@
       const slotDefaults = ref([]);
       const slotOverrides = ref([]);
       const mailTemplates = ref([]);
+      const duplicateGroupsData = ref([]);
+      const bouncedEmailsData = ref([]);
       
       // Active Data for Modals
       const activeReservation = ref(null);
       const activeSystemData = ref(null);
-      const originalReservation = ref(null); 
+      const originalReservation = ref(null);
       
       // List Filters
       const today = new Date();
@@ -209,6 +212,8 @@
       const filterDateType = ref('reservation_date'); 
       const filterDateStart = ref(Util.formatDate(yesterday, 'date')); 
       const filterDateEnd = ref(Util.formatDate(today, 'date'));       
+      const filterIssueType = ref('all'); // 'all' | 'duplicate' | 'email_error'
+      const selectedReservationIds = ref([]);
       
       const sortKey = ref('reservation_date');
       const sortOrder = ref(1);
@@ -250,7 +255,7 @@
       };
       
       const handleTouchStart = (e) => {
-        const el = document.getElementById('mobile-scroll-container');
+        const el = document.querySelector('main') || document.getElementById('mobile-scroll-container');
         if (el && el.scrollTop === 0) {
           pullStartY.value = e.touches[0].clientY;
           pullMoveY.value = e.touches[0].clientY;
@@ -282,7 +287,7 @@
         isPulling.value = false;
       };
 
-      // 예약어 삽입 버튼 노출 순서: 고객/예약 → 지점 → 예약금 → 대체 지점
+      // 예약어 삽입 버튼 노출 순서: 고객/예약 → 지점 → 예약금 → 대체 지점 → 중복 예약
       const availableKeywords = [
         'customer_name',
         'pax',
@@ -295,7 +300,9 @@
         'deposit_url',
         'alt_branch_name_en',
         'alt_branch_address',
-        'alt_branch_google_link'
+        'alt_branch_google_link',
+        'duplicate_reservation_list',
+        'duplicate_count'
       ];
       const modalTitle = ref('');
 
@@ -372,15 +379,341 @@
       });
 
       // ============================================================
-      // C. COMPUTED PROPERTIES
+      // C. COMPUTED PROPERTIES & VALIDATION
       // ============================================================
       const branchMapKo = computed(() => branches.value.reduce((m, b) => { m[b.id] = b.branch_name_ko; return m; }, {}));
       const branchMapEn = computed(() => branches.value.reduce((m, b) => { m[b.id] = b.branch_name_en; return m; }, {}));
-      
+
+      // --- 이메일 형식, 도메인 오타 및 반송(Bounce) 검증 ---
+      const EMAIL_TYPO_MAP = {
+        'gmial.com': 'gmail.com',
+        'gamil.com': 'gmail.com',
+        'gmai.com': 'gmail.com',
+        'gmaill.com': 'gmail.com',
+        'gmaik.com': 'gmail.com',
+        'gimal.com': 'gmail.com',
+        'gmail.con': 'gmail.com',
+        'naver.con': 'naver.com',
+        'nver.com': 'naver.com',
+        'nave.com': 'naver.com',
+        'navar.com': 'naver.com',
+        'naver.cm': 'naver.com',
+        'daum.con': 'daum.net',
+        'daum.com': 'daum.net',
+        'daun.net': 'daum.net',
+        'hanmial.net': 'hanmail.net',
+        'hanmail.com': 'hanmail.net',
+        'hanmail.con': 'hanmail.net',
+        'iclud.com': 'icloud.com',
+        'iclod.com': 'icloud.com',
+        'icould.com': 'icloud.com',
+        'hotmial.com': 'hotmail.com',
+        'hotmai.com': 'hotmail.com',
+        'hotmaill.com': 'hotmail.com',
+        'homail.com': 'hotmail.com',
+        'outlok.com': 'outlook.com',
+        'yahoo.con': 'yahoo.com',
+        'yaho.com': 'yahoo.com'
+      };
+
+      const bouncedThreadsSet = computed(() => new Set((bouncedEmailsData.value || []).map(b => b.threadId).filter(Boolean)));
+      const bouncedEmailsSet = computed(() => new Set((bouncedEmailsData.value || []).map(b => (b.recipientEmail || '').trim().toLowerCase()).filter(Boolean)));
+
+      const isBouncedReservation = (r) => {
+        if (!r) return false;
+        if (r.email_thread_id && bouncedThreadsSet.value.has(r.email_thread_id)) return true;
+        const norm = (r.email || '').trim().toLowerCase();
+        if (norm && bouncedEmailsSet.value.has(norm)) return true;
+        return false;
+      };
+
+      const validateEmail = (email) => {
+        if (!email || typeof email !== 'string') return { isValid: true, message: '', suggestion: null };
+        const trimmed = email.trim();
+        if (!trimmed) return { isValid: true, message: '', suggestion: null };
+
+        const syntaxRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+        if (!syntaxRegex.test(trimmed)) {
+          return { isValid: false, message: '이메일 형식 오류 (@ 또는 도메인 누락)', suggestion: null };
+        }
+
+        const parts = trimmed.split('@');
+        if (parts.length === 2) {
+          const domain = parts[1].toLowerCase();
+          if (EMAIL_TYPO_MAP[domain]) {
+            const suggestedDomain = EMAIL_TYPO_MAP[domain];
+            return {
+              isValid: false,
+              message: `도메인 오타 의심 (@${domain} → @${suggestedDomain})`,
+              suggestion: `${parts[0]}@${suggestedDomain}`
+            };
+          }
+        }
+        return { isValid: true, message: '', suggestion: null };
+      };
+
+      // 이메일 오류 종합 판별 (형식 오류, 도메인 오타, 또는 발송 실패 반송)
+      const getReservationEmailError = (r) => {
+        if (!r) return null;
+        if (isBouncedReservation(r)) {
+          return {
+            type: 'bounce',
+            label: '발송 실패 (반송됨)',
+            message: '메일 발송 실패 (반송: 없는 계정 또는 수신 거부)',
+            suggestion: null
+          };
+        }
+        const val = validateEmail(r.email);
+        if (!val.isValid) {
+          return {
+            type: val.suggestion ? 'typo' : 'format',
+            label: val.suggestion ? '오타 감지' : '형식 오류',
+            message: val.message,
+            suggestion: val.suggestion
+          };
+        }
+        return null;
+      };
+
+      const hasReservationEmailError = (r) => !!getReservationEmailError(r);
+
+      const hasEmailError = (arg) => {
+        if (!arg) return false;
+        if (typeof arg === 'object') {
+          return hasReservationEmailError(arg);
+        }
+        const norm = String(arg).trim().toLowerCase();
+        if (bouncedEmailsSet.value.has(norm)) return true;
+        return !validateEmail(arg).isValid;
+      };
+
+      const getEmailErrorMsg = (arg) => {
+        if (!arg) return '';
+        if (typeof arg === 'object') {
+          return getReservationEmailError(arg)?.message || '';
+        }
+        const norm = String(arg).trim().toLowerCase();
+        if (bouncedEmailsSet.value.has(norm)) {
+          return '메일 발송 실패 (반송: 없는 계정 또는 수신 거부)';
+        }
+        return validateEmail(arg).message || '';
+      };
+
+      const getEmailSuggestion = (email) => validateEmail(email).suggestion || null;
+      const getNormalizedEmail = (email) => {
+        if (!email || typeof email !== 'string') return '';
+        const trimmed = email.trim().toLowerCase();
+        const suggestion = getEmailSuggestion(trimmed);
+        if (suggestion) return suggestion.trim().toLowerCase();
+        return trimmed;
+      };
+
+      const activeReservationEmailSuggestion = computed(() => {
+        if (!activeReservation.value || !activeReservation.value.email) return null;
+        return getEmailSuggestion(activeReservation.value.email);
+      });
+
+      const activeReservationIsBounced = computed(() => {
+        if (!activeReservation.value) return false;
+        return isBouncedReservation(activeReservation.value);
+      });
+
+      const activeReservationEmailError = computed(() => {
+        if (!activeReservation.value) return null;
+        return getReservationEmailError(activeReservation.value);
+      });
+
+      const applyEmailSuggestion = (suggestion) => {
+        if (activeReservation.value && suggestion) {
+          activeReservation.value.email = suggestion;
+          showToast('추천 이메일 주소가 입력창에 반영되었습니다');
+        }
+      };
+
+      // 미래 비취소 예약 중 이메일 오류(오타 또는 반송)가 있는 목록
+      const emailErrorReservations = computed(() => {
+        const list = reservations.value || [];
+        const todayStartMs = new Date().setHours(0, 0, 0, 0);
+        return list.filter(r => {
+          if (r.status === 'cancel') return false;
+          const rDate = new Date(r.reservation_date);
+          if (!isNaN(rDate.getTime()) && rDate.getTime() < todayStartMs) return false;
+          return hasReservationEmailError(r);
+        });
+      });
+
+      // --- 중복 예약 그룹화 알고리즘 (Disjoint-Set Connected Components) ---
+      const duplicateGroups = computed(() => {
+        const allRes = reservations.value || [];
+        const groupsData = duplicateGroupsData.value || [];
+        const resMap = {};
+        allRes.forEach(r => { resMap[r.id] = r; });
+
+        // 개별/전체 중복아님(cleared) 처리된 예약 ID 집합 수집
+        const clearedResIds = new Set();
+        groupsData.forEach(g => {
+          if (g.status === 'cleared') {
+            const pIds = g.parsed_ids || (g.reservation_ids ? String(g.reservation_ids).split(',').map(s => s.trim()).filter(Boolean) : []);
+            pIds.forEach(id => clearedResIds.add(id));
+          }
+        });
+
+        const finalGroups = [];
+
+        groupsData.forEach(g => {
+          if (g.status !== 'active') return;
+
+          const pIds = g.parsed_ids || (g.reservation_ids ? String(g.reservation_ids).split(',').map(s => s.trim()).filter(Boolean) : []);
+          // 취소(cancel)되지 않고, 개별 중복아님(cleared) 처리되지 않은 유효 예약만 필터링 (Optimistic UI 즉시 반영)
+          const validMembers = pIds.map(id => resMap[id]).filter(r => r && r.status !== 'cancel' && !clearedResIds.has(r.id));
+
+          // 남은 유효 예약이 2건 이상인 경우만 중복 그룹으로 표시
+          if (validMembers.length >= 2) {
+            let matchReasons = [];
+            if (g.group_type === 'manual') {
+              matchReasons = ['수동 지정'];
+            } else {
+              // 예약 간 중복 사유 계산
+              const reasonsSet = new Set();
+              for (let i = 0; i < validMembers.length; i++) {
+                for (let j = i + 1; j < validMembers.length; j++) {
+                  const a = validMembers[i];
+                  const b = validMembers[j];
+                  const emailA = (a.email || '').trim().toLowerCase();
+                  const emailB = (b.email || '').trim().toLowerCase();
+                  const normA = getNormalizedEmail(a.email);
+                  const normB = getNormalizedEmail(b.email);
+                  if (emailA && emailB && (emailA === emailB || (normA && normB && normA === normB))) {
+                    reasonsSet.add(emailA === emailB ? '동일 이메일' : `이메일 오타 유사 (${normA})`);
+                  }
+                  const nameA = (a.customer_name || '').trim().toLowerCase();
+                  const nameB = (b.customer_name || '').trim().toLowerCase();
+                  if (nameA && nameB && nameA.length >= 2 && nameA === nameB) {
+                    reasonsSet.add('동일 고객명');
+                  }
+                  const phoneA = (a.phone_number || '').replace(/\D/g, '');
+                  const phoneB = (b.phone_number || '').replace(/\D/g, '');
+                  if (phoneA && phoneB && phoneA.length >= 8 && phoneA === phoneB) {
+                    reasonsSet.add('동일 전화번호');
+                  }
+                }
+              }
+              matchReasons = Array.from(reasonsSet);
+              if (matchReasons.length === 0) {
+                // 더 이상 중복 사유가 없는 자동 감지 그룹은 Optimistic UI 상에서 제외
+                return;
+              }
+            }
+
+            finalGroups.push({
+              id: g.id,
+              group_id: g.group_id || g.id,
+              group_type: g.group_type || 'auto',
+              status: 'active',
+              match_reasons: matchReasons,
+              matchLabel: matchReasons.join(', '),
+              title: `${validMembers[0]?.customer_name || '고객'} (${validMembers.length}건)`,
+              reservations: validMembers,
+              notes: g.notes || '',
+              created_at: g.created_at || validMembers[0]?.created_at,
+              mail_sent_at: g.mail_sent_at || null
+            });
+          }
+        });
+
+        // 방문일자 빠른 순으로 정렬
+        finalGroups.sort((g1, g2) => {
+          const t1 = Math.min(...g1.reservations.map(r => new Date(r.reservation_date).getTime() || 0));
+          const t2 = Math.min(...g2.reservations.map(r => new Date(r.reservation_date).getTime() || 0));
+          return t1 - t2;
+        });
+
+        return finalGroups;
+      });
+
+      const duplicateGroupTotalCount = computed(() => duplicateGroups.value.length);
+      const duplicateGroupMap = computed(() => {
+        const map = {};
+        duplicateGroups.value.forEach(group => {
+          (group.reservations || []).forEach(r => {
+            map[r.id] = group;
+          });
+        });
+        return map;
+      });
+      const activeReservationDuplicateGroup = computed(() => {
+        if (!activeReservation.value) return null;
+        return duplicateGroupMap.value[activeReservation.value.id] || null;
+      });
+
+      const isAllVisibleSelected = computed(() => {
+        const list = filterIssueType.value === 'email_error' ? emailErrorReservations.value : paginatedReservations.value;
+        if (!list || list.length === 0) return false;
+        return list.every(r => selectedReservationIds.value.includes(r.id));
+      });
+
+      const toggleSelectAllVisible = () => {
+        const list = filterIssueType.value === 'email_error' ? emailErrorReservations.value : paginatedReservations.value;
+        if (isAllVisibleSelected.value) {
+          const listIds = new Set(list.map(r => r.id));
+          selectedReservationIds.value = selectedReservationIds.value.filter(id => !listIds.has(id));
+        } else {
+          const newSet = new Set(selectedReservationIds.value);
+          list.forEach(r => newSet.add(r.id));
+          selectedReservationIds.value = Array.from(newSet);
+        }
+      };
+
+      const toggleIssueFilter = (type) => {
+        if (filterIssueType.value === type) {
+          filterIssueType.value = 'all';
+        } else {
+          filterIssueType.value = type;
+          currentPage.value = 1;
+        }
+      };
+
       const notifications = computed(() => {
         const list = [];
         const nowMs = now.value.getTime();
 
+        // 1. [중복 의심] 그룹 알림
+        duplicateGroups.value.forEach(group => {
+          const earliestTime = Math.min(...group.reservations.map(r => new Date(r.reservation_date).getTime() || nowMs));
+          list.push({
+            id: 'dup_' + group.id,
+            type: 'duplicate',
+            types: ['duplicate'],
+            primaryType: 'duplicate',
+            group: group,
+            subCount: group.reservations.length,
+            desc: `${group.reservations[0]?.customer_name || '고객'} 외 ${group.reservations.length - 1}건 중복 의심`,
+            timeText: `${group.reservations.length}건 예약 겹침`,
+            sortTime: earliestTime
+          });
+        });
+
+        // 2. [이메일 오류] 단건 알림
+        emailErrorReservations.value.forEach(res => {
+          const resTime = new Date(res.reservation_date);
+          const resMs = !isNaN(resTime.getTime()) ? resTime.getTime() : nowMs;
+          const errorMsg = getEmailErrorMsg(res.email);
+          const suggestion = getEmailSuggestion(res.email);
+          list.push({
+            id: 'email_err_' + res.id,
+            type: 'email_error',
+            types: ['email_error'],
+            primaryType: 'email_error',
+            reservation: res,
+            errorMsg: errorMsg,
+            suggestion: suggestion,
+            desc: `${res.customer_name} | ${res.email}`,
+            timeText: errorMsg,
+            sortTime: resMs
+          });
+        });
+
+        // 3. 기존 일반 예약 알림 건 (pending, deposit, imminent, refund)
         (reservations.value || []).forEach(res => {
           if (res.status === 'cancel') return;
           
@@ -534,15 +867,24 @@
         }
         if (filterDeposit.value !== 'all') list = list.filter(r => r.deposit_status === filterDeposit.value);
         if (filterBranchIds.value.length) list = list.filter(r => filterBranchIds.value.includes(r.branch_id));
+        if (filterIssueType.value === 'email_error') {
+          const errIdSet = new Set(emailErrorReservations.value.map(r => r.id));
+          list = list.filter(r => errIdSet.has(r.id));
+        }
+        if (filterIssueType.value === 'duplicate') {
+          list = list.filter(r => duplicateGroupMap.value[r.id]);
+        }
         
         const dateCol = filterDateType.value;
-        if (filterDateStart.value) {
-          const start = Util.parseInAppTz(filterDateStart.value);
-          list = list.filter(r => r[dateCol] && new Date(r[dateCol]).getTime() >= start);
-        }
-        if (filterDateEnd.value) {
-          const end = Util.parseInAppTz(filterDateEnd.value) + 24 * 60 * 60 * 1000;
-          list = list.filter(r => r[dateCol] && new Date(r[dateCol]).getTime() < end);
+        if (filterIssueType.value !== 'email_error' && filterIssueType.value !== 'duplicate') {
+          if (filterDateStart.value) {
+            const start = Util.parseInAppTz(filterDateStart.value);
+            list = list.filter(r => r[dateCol] && new Date(r[dateCol]).getTime() >= start);
+          }
+          if (filterDateEnd.value) {
+            const end = Util.parseInAppTz(filterDateEnd.value) + 24 * 60 * 60 * 1000;
+            list = list.filter(r => r[dateCol] && new Date(r[dateCol]).getTime() < end);
+          }
         }
 
         const k = sortKey.value;
@@ -677,7 +1019,14 @@
       
       const handleNotificationClick = (noti) => {
         isNotificationOpen.value = false;
-        openModal('reservation', noti.reservation);
+        if (noti.type === 'duplicate') {
+          currentView.value = 'list';
+          filterIssueType.value = 'duplicate';
+        } else if (noti.type === 'email_error') {
+          openModal('reservation', noti.reservation);
+        } else {
+          openModal('reservation', noti.reservation);
+        }
       };
 
       const sortBy = (k) => { if (sortKey.value === k) sortOrder.value *= -1; else { sortKey.value = k; sortOrder.value = 1; } };
@@ -885,13 +1234,16 @@
           if (!silent) { isLoading.value = true; loadingMessage.value = '데이터 갱신 중...'; }
           const promises = [
             runGoogleScriptSilent('apiGetBranches'), runGoogleScriptSilent('apiGetReservations'), runGoogleScriptSilent('apiGetSlotMasters'),
-            runGoogleScriptSilent('apiGetSlotDefaults'), runGoogleScriptSilent('apiGetSlotOverrides'), runGoogleScriptSilent('apiGetMailTemplates')
+            runGoogleScriptSilent('apiGetSlotDefaults'), runGoogleScriptSilent('apiGetSlotOverrides'), runGoogleScriptSilent('apiGetMailTemplates'),
+            runGoogleScriptSilent('apiGetDuplicateGroups'), runGoogleScriptSilent('apiGetBouncedEmails')
           ];
           if (currentUser.value && currentUser.value.role === 'admin') promises.push(runGoogleScriptSilent('apiGetUsers'));
           const results = await Promise.all(promises);
           branches.value = results[0].data || []; reservations.value = results[1].data || []; slotMasters.value = results[2].data || [];
           slotDefaults.value = results[3].data || []; slotOverrides.value = results[4].data || []; mailTemplates.value = results[5].data || [];
-          if (currentUser.value.role === 'admin' && results[6]) users.value = results[6].data || [];
+          duplicateGroupsData.value = results[6]?.data || [];
+          bouncedEmailsData.value = results[7]?.data || [];
+          if (currentUser.value.role === 'admin' && results[8]) users.value = results[8].data || [];
         } catch (e) { console.error(e); if (!silent) await showCustomAlert('오류', '데이터 갱신 실패: ' + e.message); } 
         finally { if (!silent) isLoading.value = false; }
       };
@@ -992,9 +1344,18 @@
         activeReservation.value.internal_notes = payload.internal_notes;
         activeReservation.value.private_notes = payload.private_notes;
         if (target) {
+          const oldEmail = (listSnapshot && listSnapshot.email) || target.email;
           Object.assign(target, payload);
           target.reservation_date = newDateIso;
+          if (oldEmail && payload.email && oldEmail.trim().toLowerCase() !== payload.email.trim().toLowerCase()) {
+            if (bouncedEmailsData.value && bouncedEmailsData.value.length) {
+              bouncedEmailsData.value = bouncedEmailsData.value.filter(b => 
+                (b.recipientEmail || '').trim().toLowerCase() !== oldEmail.trim().toLowerCase()
+              );
+            }
+          }
         }
+        reservations.value = [...reservations.value];
         originalReservation.value = JSON.parse(JSON.stringify(activeReservation.value));
         showToast('저장되었습니다');
 
@@ -1017,6 +1378,13 @@
         const tmpl = mailTemplates.value.find(t => t.id === selectedMailTemplateId.value);
         return !!(tmpl && (tmpl.body_html || '').includes('[[alt_'));
       });
+
+      // 선택 템플릿 본문에 [[duplicate_ 예약어가 있으면 중복 예약 안내 전용 모드
+      const selectedTemplateNeedsDuplicateList = computed(() => {
+        const tmpl = mailTemplates.value.find(t => t.id === selectedMailTemplateId.value);
+        return !!(tmpl && (tmpl.body_html || '').includes('[[duplicate_'));
+      });
+
       // 대체 지점 후보: 현재 예약 지점을 제외한 활성 지점
       const altBranchOptions = computed(() => {
         const currentId = activeReservation.value ? activeReservation.value.branch_id : null;
@@ -1050,18 +1418,319 @@
                 branch_google_link: branch.google_map_link || ''
               }
             };
+
+            // 중복 예약 리스트 예약어 주입
+            if (selectedTemplateNeedsDuplicateList.value && activeReservationDuplicateGroup.value) {
+              payload.data.duplicate_reservations = (activeReservationDuplicateGroup.value.reservations || []).map(r => ({
+                branch_name: branchMapKo.value[r.branch_id] || getBranchName(r.branch_id),
+                branch_name_en: branchMapEn.value[r.branch_id] || '',
+                date_time: Util.formatDate(r.reservation_date, 'datetime'),
+                pax: r.pax
+              }));
+            }
+
             const res = await runGoogleScriptSilent('apiSendTemplatedMail', payload);
-            if (res.success) { showCustomAlert("성공", "발송됨"); selectedMailTemplateId.value = ''; selectedAltBranchId.value = ''; runGoogleScriptSilent('apiMarkReservationAsRead', activeReservation.value.id); }
+            if (res.success) { 
+              showCustomAlert("성공", "발송됨"); 
+              selectedMailTemplateId.value = ''; 
+              selectedAltBranchId.value = ''; 
+              runGoogleScriptSilent('apiMarkReservationAsRead', activeReservation.value.id);
+
+              if (activeReservationDuplicateGroup.value) {
+                try {
+                  const mailRes = await runGoogleScriptSilent('apiMarkDuplicateMailSent', {
+                    groupId: activeReservationDuplicateGroup.value.id,
+                    reservationIds: (activeReservationDuplicateGroup.value.reservations || []).map(r => r.id)
+                  });
+                  if (mailRes && mailRes.success) {
+                    await refreshInitialData(true);
+                  }
+                } catch (e) {
+                  console.warn('Failed to mark duplicate mail sent:', e);
+                }
+              }
+            }
             else showCustomAlert("실패", res.message);
           } catch (e) { showCustomAlert("오류", e.message); }
           finally { isModalLoading.value = false; }
         }
       };
 
+      // --- 중복 의심 및 수동 그룹 핸들러 ---
+      const excludeSingleReservationFromGroup = async (res, group = null) => {
+        const targetGroup = group || activeReservationDuplicateGroup.value || (duplicateGroups.value || []).find(g => (g.reservations || []).some(r => r.id === res.id));
+        if (!targetGroup) return;
+        const confirmed = await showCustomConfirm('중복 제외', `[${res.customer_name}] 건을 중복 그룹에서 제외하시겠습니까?`);
+        if (!confirmed) return;
+
+        // [Snapshot] 서버 실패 시 롤백을 위한 스냅샷
+        const snapshot = JSON.parse(JSON.stringify(duplicateGroupsData.value || []));
+
+        try {
+          isMutating.value = true;
+
+          // [Optimistic UI] 즉시 로컬 메모리에서 해당 예약을 제외
+          const gData = (duplicateGroupsData.value || []).find(g => g.group_id === targetGroup.id || g.id === targetGroup.id);
+          if (gData) {
+            if (gData.parsed_ids) gData.parsed_ids = gData.parsed_ids.filter(id => id !== res.id);
+            if (gData.reservation_ids) {
+              const ids = Array.isArray(gData.reservation_ids) ? gData.reservation_ids : String(gData.reservation_ids).split(',');
+              gData.reservation_ids = ids.map(s => s.trim()).filter(id => id && id !== res.id);
+            }
+          }
+          // cleared 예약 목록에도 낙관적 추가
+          duplicateGroupsData.value.push({
+            id: `cleared_${res.id}`,
+            group_id: `cleared_${res.id}`,
+            reservation_ids: [res.id],
+            parsed_ids: [res.id],
+            status: 'cleared'
+          });
+          duplicateGroupsData.value = [...duplicateGroupsData.value];
+
+          await runGoogleScriptSilent('apiExcludeReservationFromGroup', {
+            groupId: targetGroup.id,
+            reservationId: res.id
+          });
+          showToast('중복 그룹에서 제외되었습니다');
+          await refreshInitialData(true);
+        } catch (e) {
+          // [Rollback] 서버 오류 시 즉시 이전 상태로 복구
+          duplicateGroupsData.value = snapshot;
+          showCustomAlert('오류', `중복 제외 처리에 실패하여 원래대로 복구되었습니다.\n${e.message}`);
+        } finally {
+          isMutating.value = false;
+        }
+      };
+
+      const clearDuplicateGroup = async (group) => {
+        if (!group) return;
+        const confirmed = await showCustomConfirm('전체 중복아님 처리', '해당 예약들을 중복이 아닌 것으로 처리하시겠습니까? (이후 알림에서 제외됩니다)');
+        if (!confirmed) return;
+
+        // [Snapshot] 서버 실패 시 롤백을 위한 스냅샷
+        const snapshot = JSON.parse(JSON.stringify(duplicateGroupsData.value || []));
+
+        try {
+          isMutating.value = true;
+          const resIds = (group.reservations || []).map(r => r.id);
+          const earliestDateStr = group.reservations?.[0]?.reservation_date ? String(group.reservations[0].reservation_date).slice(0, 10) : new Date().toISOString().slice(0, 10);
+
+          // [Optimistic UI] 즉시 해당 그룹을 로컬에서 cleared 상태로 전환
+          const gData = (duplicateGroupsData.value || []).find(g => g.group_id === group.id || g.id === group.id);
+          if (gData) {
+            gData.status = 'cleared';
+          }
+          duplicateGroupsData.value = [...duplicateGroupsData.value];
+
+          await runGoogleScriptSilent('apiClearDuplicateGroup', {
+            groupId: group.id,
+            reservationIds: resIds,
+            earliestDate: earliestDateStr
+          });
+          showToast('중복 아님 처리되었습니다');
+          await refreshInitialData(true);
+        } catch (e) {
+          // [Rollback] 서버 오류 시 복구
+          duplicateGroupsData.value = snapshot;
+          showCustomAlert('오류', `전체 중복아님 처리에 실패하여 원래대로 복구되었습니다.\n${e.message}`);
+        } finally {
+          isMutating.value = false;
+        }
+      };
+
+      const handleRemoveManualGroup = async (group) => {
+        if (!group) return;
+        const confirmed = await showCustomConfirm('수동 묶음 해제', '수동으로 묶인 중복 그룹을 해제하시겠습니까?');
+        if (!confirmed) return;
+
+        // [Snapshot] 서버 실패 시 롤백을 위한 스냅샷
+        const snapshot = JSON.parse(JSON.stringify(duplicateGroupsData.value || []));
+
+        try {
+          isMutating.value = true;
+
+          // [Optimistic UI] 즉시 해당 그룹 로컬 제거
+          duplicateGroupsData.value = (duplicateGroupsData.value || []).filter(g => g.group_id !== group.id && g.id !== group.id);
+
+          await runGoogleScriptSilent('apiRemoveManualDuplicateGroup', { groupId: group.id });
+          showToast('수동 중복 그룹이 해제되었습니다');
+          await refreshInitialData(true);
+        } catch (e) {
+          // [Rollback] 서버 오류 시 복구
+          duplicateGroupsData.value = snapshot;
+          showCustomAlert('오류', `수동 그룹 해제에 실패하여 원래대로 복구되었습니다.\n${e.message}`);
+        } finally {
+          isMutating.value = false;
+        }
+      };
+
+      const handleCreateManualDuplicateGroup = async () => {
+        if (selectedReservationIds.value.length < 2) {
+          showCustomAlert('알림', '최소 2건 이상의 예약을 선택해주세요.');
+          return;
+        }
+        const confirmed = await showCustomConfirm('중복 그룹 묶기', `선택한 ${selectedReservationIds.value.length}건의 예약을 수동 중복 그룹으로 묶으시겠습니까?`);
+        if (!confirmed) return;
+        try {
+          isMutating.value = true;
+          const selectedRes = reservations.value.filter(r => selectedReservationIds.value.includes(r.id));
+          const earliestTime = Math.min(...selectedRes.map(r => new Date(r.reservation_date).getTime() || 0));
+          const earliestDateStr = earliestTime && !isNaN(earliestTime) ? new Date(earliestTime).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+
+          const res = await runGoogleScriptSilent('apiCreateManualDuplicateGroup', {
+            reservationIds: selectedReservationIds.value,
+            earliestDate: earliestDateStr
+          });
+          if (res && res.success) {
+            showToast('수동 중복 그룹이 생성되었습니다');
+            selectedReservationIds.value = [];
+            filterIssueType.value = 'duplicate';
+            await refreshInitialData(true);
+          } else {
+            showCustomAlert('오류', (res && res.message) || '생성 실패');
+          }
+        } catch (e) {
+          showCustomAlert('오류', e.message);
+        } finally {
+          isMutating.value = false;
+        }
+      };
+
+      // --- 중복예약 확인메일 발송 모달 & 스레드 선택 로직 ---
+      const targetDuplicateMailGroup = ref(null);
+      const selectedDuplicateTargetResId = ref('');
+      const isSendingDuplicateMail = ref(false);
+      const sendingDuplicateMailGroupId = ref(null);
+
+      const selectedDuplicateTargetReservation = computed(() => {
+        if (!targetDuplicateMailGroup.value || !selectedDuplicateTargetResId.value) return null;
+        return (targetDuplicateMailGroup.value.reservations || []).find(r => r.id === selectedDuplicateTargetResId.value) || null;
+      });
+
+      const hasSelectableThreadInGroup = computed(() => {
+        if (!targetDuplicateMailGroup.value) return false;
+        return (targetDuplicateMailGroup.value.reservations || []).some(r => !!r.email_thread_id);
+      });
+
+      const openDuplicateMailModal = (group) => {
+        if (!group) return;
+        targetDuplicateMailGroup.value = group;
+
+        // 우선순위: 현재 모달에 열려있는 activeReservation이 그룹 내에 있고 스레드가 있다면 우선 선택,
+        // 아니면 그룹 내 첫 번째로 스레드가 있는 예약을 기본 선택
+        const memberList = group.reservations || [];
+        if (activeReservation.value && activeReservation.value.email_thread_id && memberList.some(r => r.id === activeReservation.value.id)) {
+          selectedDuplicateTargetResId.value = activeReservation.value.id;
+        } else {
+          const firstWithThread = memberList.find(r => !!r.email_thread_id);
+          selectedDuplicateTargetResId.value = firstWithThread ? firstWithThread.id : '';
+        }
+
+        modalState.duplicateMail = true;
+      };
+
+      const closeDuplicateMailModal = () => {
+        modalState.duplicateMail = false;
+        targetDuplicateMailGroup.value = null;
+        selectedDuplicateTargetResId.value = '';
+      };
+
+      const submitDuplicateConfirmationMail = async () => {
+        const group = targetDuplicateMailGroup.value;
+        const targetRes = selectedDuplicateTargetReservation.value;
+        if (!group || !targetRes || !targetRes.email_thread_id) {
+          showCustomAlert("오류", "선택된 예약에 유효한 이메일 스레드가 없습니다.");
+          return;
+        }
+
+        const confirmed = await showCustomConfirm(
+          "중복확인 메일 발송",
+          `[${getBranchName(targetRes.branch_id)}] ${targetRes.customer_name} 고객님의 이메일 스레드로 중복확인 안내 메일을 발송하시겠습니까?`
+        );
+        if (!confirmed) return;
+
+        try {
+          isSendingDuplicateMail.value = true;
+          sendingDuplicateMailGroupId.value = group.id;
+          const duplicateReservations = (group.reservations || []).map(r => ({
+            branch_name: branchMapKo.value[r.branch_id] || getBranchName(r.branch_id),
+            branch_name_en: branchMapEn.value[r.branch_id] || '',
+            reservation_date: r.reservation_date,
+            pax: r.pax
+          }));
+
+          const payload = {
+            groupId: group.id,
+            targetReservationId: targetRes.id,
+            threadId: targetRes.email_thread_id,
+            customerName: targetRes.customer_name,
+            duplicateReservations: duplicateReservations,
+            reservationIds: (group.reservations || []).map(r => r.id)
+          };
+
+          const res = await runGoogleScriptSilent('apiSendDuplicateConfirmationMail', payload);
+          if (res && res.success) {
+            // [Optimistic UI] 응답 즉시 group.mail_sent_at을 로컬에 반영하여 딜레이 없이 즉시 갱신
+            const sentAt = (res.data && res.data.mail_sent_at) || new Date().toISOString();
+            if (group) group.mail_sent_at = sentAt;
+            const targetGroup = (duplicateGroupsData.value || []).find(g => (g.group_id === group.id || g.id === group.id));
+            if (targetGroup) {
+              targetGroup.mail_sent_at = sentAt;
+            } else {
+              duplicateGroupsData.value.push({
+                id: group.id,
+                group_id: group.id,
+                mail_sent_at: sentAt,
+                status: 'active',
+                group_type: group.group_type || 'auto',
+                reservation_ids: (group.reservations || []).map(r => r.id).join(',')
+              });
+            }
+            duplicateGroupsData.value = [...duplicateGroupsData.value];
+
+            showToast('중복확인 안내 메일이 발송되었습니다.');
+            closeDuplicateMailModal();
+            refreshInitialData(true); // 백그라운드 동기화
+          } else {
+            showCustomAlert('발송 실패', (res && res.message) || '메일 발송 중 오류가 발생했습니다.');
+          }
+        } catch (e) {
+          showCustomAlert('오류', e.message);
+        } finally {
+          isSendingDuplicateMail.value = false;
+          sendingDuplicateMailGroupId.value = null;
+        }
+      };
+
+      // --- 중복 그룹별 접기/펼치기 로직 ---
+      const collapsedGroupMap = ref({});
+
+      const toggleGroupCollapse = (groupId) => {
+        if (!groupId) return;
+        collapsedGroupMap.value[groupId] = !collapsedGroupMap.value[groupId];
+      };
+
+      const areAllGroupsCollapsed = computed(() => {
+        if (!duplicateGroups.value || duplicateGroups.value.length === 0) return false;
+        return duplicateGroups.value.every(g => !!collapsedGroupMap.value[g.id]);
+      });
+
+      const toggleAllGroupsCollapse = () => {
+        const nextState = !areAllGroupsCollapsed.value;
+        const newMap = {};
+        (duplicateGroups.value || []).forEach(g => {
+          newMap[g.id] = nextState;
+        });
+        collapsedGroupMap.value = newMap;
+      };
+
       const initializeMailThread = async () => {
         if (await showCustomConfirm("신규 스레드 생성", "고객에게 예약 확정 내역을 발송하고 새로운 메일 스레드를 생성하시겠습니까?")) {
           try {
             isModalLoading.value = true;
+            const oldEmail = activeReservation.value.email;
+            const oldThreadId = activeReservation.value.email_thread_id;
             const branch = branches.value.find(b => b.id === activeReservation.value.branch_id) || {};
             const payload = {
               reservationId: activeReservation.value.id,
@@ -1075,20 +1744,128 @@
             const res = await runGoogleScriptSilent('apiInitializeMailThread', payload);
             if (res.success) { 
               activeReservation.value.email_thread_id = res.data.threadId;
+              if (originalReservation.value) {
+                originalReservation.value.email_thread_id = res.data.threadId;
+                if (activeReservation.value.email) {
+                  originalReservation.value.email = activeReservation.value.email;
+                }
+              }
               const targetIdx = reservations.value.findIndex(r => r.id === activeReservation.value.id);
               if (targetIdx > -1) {
                 reservations.value[targetIdx].email_thread_id = res.data.threadId;
+                if (activeReservation.value.email) {
+                  reservations.value[targetIdx].email = activeReservation.value.email;
+                }
               }
+
+              // [Optimistic UI] 이전 반송(bounce) 기록에서 즉시 제거
+              if (bouncedEmailsData.value && bouncedEmailsData.value.length) {
+                bouncedEmailsData.value = bouncedEmailsData.value.filter(b => 
+                  (oldThreadId ? b.threadId !== oldThreadId : true) &&
+                  (oldEmail ? (b.recipientEmail || '').trim().toLowerCase() !== oldEmail.trim().toLowerCase() : true)
+                );
+              }
+              // Vue 3 반응성 트리거 (이슈 필터 뱃지 카운트 즉각 갱신)
+              reservations.value = [...reservations.value];
+
               showCustomAlert("성공", "새 스레드가 생성되었으며 고객에게 메일이 발송되었습니다."); 
               // [Async] 서버 측에서 클라이언트 응답을 지연시키지 않기 위해 라벨 추가는 성공 응답 직후 별도 백그라운드 호출
               runGoogleScriptSilent('apiAddLabelsToThread', {
                 threadId: res.data.threadId,
-                pax: activeReservation.value.pax
+                pax: activeReservation.value.pax,
+                status: activeReservation.value.status,
+                deposit_status: activeReservation.value.deposit_status,
+                reservationId: activeReservation.value.id
               }).catch(e => console.warn("Background label addition failed:", e));
             } 
             else showCustomAlert("실패", res.message);
           } catch (e) { showCustomAlert("오류", e.message); }
           finally { isModalLoading.value = false; }
+        }
+      };
+
+      const handleCorrectEmailAndSendConfirmation = async () => {
+        if (!activeReservation.value) return;
+        const targetEmail = (activeReservation.value.email || '').trim();
+        if (!targetEmail) {
+          showCustomAlert("입력 확인", "고객 이메일 주소를 입력해주세요.");
+          return;
+        }
+
+        // 이메일 기본 형식 검증 (@ 및 도메인 구조)
+        const emailValidation = validateEmail(targetEmail);
+        if (!emailValidation.isValid && !emailValidation.suggestion) {
+          showCustomAlert("형식 오류", "올바른 이메일 주소 형식을 입력해주세요. (예: example@hotmail.com)");
+          return;
+        }
+
+        const confirmed = await showCustomConfirm(
+          "주소 변경 및 확정메일 재발송",
+          `현재 입력된 이메일 주소 "${targetEmail}"(으)로 변경하고,\n서버에 저장 후 고객에게 예약 확정 안내 메일을 재발송하여 새로운 메일 스레드를 생성하시겠습니까?`
+        );
+        if (!confirmed) return;
+
+        try {
+          isModalLoading.value = true;
+          const oldEmail = activeReservation.value.email;
+          const oldThreadId = activeReservation.value.email_thread_id;
+          const branch = branches.value.find(b => b.id === activeReservation.value.branch_id) || {};
+          const payload = {
+            reservationId: activeReservation.value.id,
+            newEmail: targetEmail,
+            data: {
+              ...activeReservation.value,
+              email: targetEmail,
+              branch_name_en: branchMapEn.value[activeReservation.value.branch_id],
+              branch_address: branch.address || '',
+              branch_google_link: branch.google_map_link || ''
+            }
+          };
+
+          const res = await runGoogleScriptSilent('apiCorrectEmailAndInitializeThread', payload);
+          if (res.success) {
+            activeReservation.value.email = res.data.email;
+            activeReservation.value.email_thread_id = res.data.threadId;
+            if (originalReservation.value) {
+              originalReservation.value.email = res.data.email;
+              originalReservation.value.email_thread_id = res.data.threadId;
+            }
+
+            const targetIdx = reservations.value.findIndex(r => r.id === activeReservation.value.id);
+            if (targetIdx > -1) {
+              reservations.value[targetIdx].email = res.data.email;
+              reservations.value[targetIdx].email_thread_id = res.data.threadId;
+            }
+
+            // [Optimistic UI] 이전 반송(bounce) 기록에서 즉시 제거하여 필터 뱃지 카운트 즉각 갱신
+            if (bouncedEmailsData.value && bouncedEmailsData.value.length) {
+              bouncedEmailsData.value = bouncedEmailsData.value.filter(b => 
+                (oldThreadId ? b.threadId !== oldThreadId : true) &&
+                (oldEmail ? (b.recipientEmail || '').trim().toLowerCase() !== oldEmail.trim().toLowerCase() : true)
+              );
+            }
+            // Vue 3 얕은 반응성 트리거 (computed 프로퍼티 즉각 재계산)
+            reservations.value = [...reservations.value];
+
+            showCustomAlert("완료", "이메일 주소가 성공적으로 변경되었으며, 고객에게 예약 확인서 메일 발송 및 신규 스레드 생성이 완료되었습니다.");
+
+            // 백그라운드 라벨 추가 (예약 상태 및 예약금 상태 싱크)
+            runGoogleScriptSilent('apiAddLabelsToThread', {
+              threadId: res.data.threadId,
+              pax: activeReservation.value.pax,
+              status: activeReservation.value.status,
+              deposit_status: activeReservation.value.deposit_status,
+              reservationId: activeReservation.value.id
+            }).catch(e => console.warn("Background label addition failed:", e));
+
+            await refreshInitialData(true);
+          } else {
+            showCustomAlert("실패", res.message);
+          }
+        } catch (e) {
+          showCustomAlert("오류", e.message);
+        } finally {
+          isModalLoading.value = false;
         }
       };
 
@@ -1554,10 +2331,73 @@
           
           window.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
-              if (isModalLoading.value) return; // 스피너 동작 중일 때 ESC 키 무시
-              if (modalState.reservation) closeModal('reservation');
-              else if (modalState.system) closeModal('system');
-              else if (modalState.mail) closeModal('mail');
+              // 1. Alert/Confirm 팝업 (최상위 레이어 z-[1000])
+              if (alertModal.isOpen) {
+                e.preventDefault();
+                e.stopPropagation();
+                handleAlertResult(alertModal.isConfirm ? false : true);
+                return;
+              }
+
+              // 스피너나 메일 발송 로딩 중일 때는 ESC 무시
+              if (isModalLoading.value || isSendingDuplicateMail.value) {
+                e.preventDefault();
+                return;
+              }
+
+              // 2. 중복확인 메일 스레드 선택 서브모달 (z-[60])
+              if (modalState.duplicateMail) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeDuplicateMailModal();
+                return;
+              }
+
+              // 3. 모달 내부 상태 드롭다운 또는 헤더 드롭다운이 열려있는 경우
+              if (isStatusDropdownOpen.value) {
+                e.preventDefault();
+                e.stopPropagation();
+                isStatusDropdownOpen.value = false;
+                return;
+              }
+              if (isProfileDropdownOpen.value) {
+                e.preventDefault();
+                e.stopPropagation();
+                isProfileDropdownOpen.value = false;
+                return;
+              }
+              if (isNotificationOpen.value) {
+                e.preventDefault();
+                e.stopPropagation();
+                isNotificationOpen.value = false;
+                return;
+              }
+              if (isMobileMenuOpen.value) {
+                e.preventDefault();
+                e.stopPropagation();
+                isMobileMenuOpen.value = false;
+                return;
+              }
+
+              // 4. 기본 모달 레이어 (z-50)
+              if (modalState.reservation) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeModal('reservation');
+                return;
+              }
+              if (modalState.system) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeModal('system');
+                return;
+              }
+              if (modalState.mail) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeModal('mail');
+                return;
+              }
             }
           });
           
@@ -1624,13 +2464,24 @@
         isLoading, loadingMessage, appState, deniedMessage, currentView, currentUser, isModalLoading, syncCountdown, isSyncing,
         isProfileDropdownOpen, isNotificationOpen, isMutating, isMobileMenuOpen, logoutUrl, refundOrderUrl, refundTarget, modalState, alertModal,
         activeReservation, activeSystemData,
-        reservations, branches, users, mailTemplates, slotMasters, slotDefaults, slotOverrides,
+        reservations, branches, users, mailTemplates, duplicateGroupsData, slotMasters, slotDefaults, slotOverrides,
         filterText, filterStatus, filterDeposit, filterBranchIds, filterDateType, filterDateStart, filterDateEnd,
+        filterIssueType, selectedReservationIds,
         sortKey, sortOrder, currentPage, itemsPerPage,
         settingsTab, currentSlotDate, selectedSlotBranchId, selectedCalendarBranchId,
         filteredReservations, paginatedReservations, totalPage, branchMapKo, branchMapEn, slotSettingsBranches, filteredSlotBranches,
         activeCalendarId, calendarIframeSrc, slotMasterMap,
         notifications, notificationCount,
+        emailErrorReservations, duplicateGroups, duplicateGroupTotalCount, duplicateGroupMap, activeReservationDuplicateGroup,
+        bouncedEmailsData, activeReservationIsBounced, activeReservationEmailError, isBouncedReservation, getReservationEmailError,
+        isAllVisibleSelected, toggleSelectAllVisible, toggleIssueFilter,
+        validateEmail, hasEmailError, getEmailErrorMsg, getEmailSuggestion, activeReservationEmailSuggestion, applyEmailSuggestion,
+        handleCorrectEmailAndSendConfirmation,
+        excludeSingleReservationFromGroup, clearDuplicateGroup, handleRemoveManualGroup, handleCreateManualDuplicateGroup,
+        targetDuplicateMailGroup, selectedDuplicateTargetResId, isSendingDuplicateMail, sendingDuplicateMailGroupId,
+        selectedDuplicateTargetReservation, hasSelectableThreadInGroup,
+        openDuplicateMailModal, closeDuplicateMailModal, submitDuplicateConfirmationMail,
+        collapsedGroupMap, toggleGroupCollapse, areAllGroupsCollapsed, toggleAllGroupsCollapse,
         setCurrentView, setCurrentViewAndCloseMenu, toggleProfileDropdown, toggleNotificationDropdown, toggleMobileMenu, 
         runGoogleScript, openModal, closeModal, showCustomAlert, showCustomConfirm, handleAlertResult,
         refreshInitialData, handleManualRefresh, formatDate: Util.formatDate,
@@ -1646,9 +2497,8 @@
         openSlotEditModal,
         openSlotBatchModal, applySlotBatchPreset,
         handleNotificationClick,
-        // [MODIFIED] Added create mode support (null arg)
         openMailTemplateModal: (t = null) => openModal('mail', { type: 'mail', mode: t ? 'edit' : 'create', data: t }),
-        localDateTime, selectedMailTemplateId, selectedAltBranchId, selectedTemplateNeedsAltBranch, altBranchOptions, localData, userBranchIds, slotBatchPayload, localMailData, availableKeywords, modalTitle, 
+        localDateTime, selectedMailTemplateId, selectedAltBranchId, selectedTemplateNeedsAltBranch, selectedTemplateNeedsDuplicateList, altBranchOptions, localData, userBranchIds, slotBatchPayload, localMailData, availableKeywords, modalTitle, 
         isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid, isReservationDirty, isSystemDirty, isMailDirty, toast, cellTip, showCellTip, hideCellTip, copyToClipboard,
         handleSaveReservation, isStatusDropdownOpen, toggleStatusDropdown, setReservationStatus, depositAmountDisplay, handleDepositAmountInput, handleDepositAmountKeydown, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder,
         renderPreview, isPreviewMode, togglePreview,
