@@ -1,5 +1,5 @@
 <!-- ViewList.html (예약 리스트 메인 뷰 - Final Version) -->
-<div class="h-full flex flex-col space-y-4 overflow-hidden">
+<div class="min-h-full md:h-full flex flex-col space-y-4 md:overflow-hidden">
 
   <!-- 1. 메인 필터 및 검색 바 (데스크톱) -->
   <div class="hidden md:block bg-white p-4 rounded-xl shadow border border-gray-100 flex-shrink-0">
@@ -59,10 +59,11 @@
       </div>
     </div>
 
-    <!-- 지점 필터 및 결과 수 -->
-    <div class="mt-3 pt-3 border-t border-gray-100 flex justify-between items-center">
-      <div class="flex flex-wrap gap-2 items-center">
-        <span class="text-xs font-bold text-gray-500 uppercase mr-1">지점 필터:</span>
+    <!-- 지점 필터 및 이슈 필터 (자리 충분 시 1줄, 부족 시 줄바꿈) -->
+    <div class="mt-3 pt-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-y-2.5 gap-x-4">
+      <!-- 1) 지점 필터 그룹 -->
+      <div class="flex flex-wrap gap-2 items-center min-w-0">
+        <span class="text-xs font-bold text-gray-500 uppercase mr-1 whitespace-nowrap">지점 필터:</span>
         <button
           v-for="branch in branches"
           :key="branch.id"
@@ -71,7 +72,7 @@
             'bg-primary-700 text-white shadow-md ring-2 ring-primary-200': isBranchSelected(branch.id),
             'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-gray-300': !isBranchSelected(branch.id)
           }"
-          class="px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 flex items-center"
+          class="px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 flex items-center whitespace-nowrap flex-shrink-0"
         >
           <i v-if="isBranchSelected(branch.id)" class="ph-check-bold mr-1"></i>
           {{ branch.branch_name_ko }}
@@ -79,14 +80,52 @@
         <button
           @click="clearBranchFilters"
           v-if="hasFilterBranches"
-          class="px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors ml-auto flex items-center"
+          class="px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors flex items-center whitespace-nowrap flex-shrink-0"
         >
           <i class="ph ph-arrow-counter-clockwise mr-1"></i> 초기화
         </button>
       </div>
-      <!-- 총 결과 수 -->
-      <div class="text-sm font-bold text-gray-600">
-        총 <span class="text-primary-700">{{ filteredReservations.length }}</span> 건
+
+      <!-- 2) 이슈 필터 및 결과 수 행 (자리 부족 시 줄바꿈되어 왼쪽 정렬, 총 N건은 우측 끝) -->
+      <div class="flex items-center justify-between gap-3 flex-wrap flex-1 min-w-[280px]">
+        <!-- 이슈 필터 -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-xs font-bold text-gray-500 uppercase mr-1 whitespace-nowrap">이슈 필터:</span>
+          <button
+            type="button"
+            @click="toggleIssueFilter('duplicate')"
+            :class="filterIssueType === 'duplicate' ? 'bg-purple-700 text-white shadow-sm ring-2 ring-purple-200' : 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100'"
+            class="px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center whitespace-nowrap flex-shrink-0"
+          >
+            <i class="ph ph-users-three mr-1 text-xs"></i>
+            중복 의심 ({{ duplicateGroupTotalCount }})
+          </button>
+
+          <button
+            type="button"
+            @click="toggleIssueFilter('email_error')"
+            :class="filterIssueType === 'email_error' ? 'bg-red-600 text-white shadow-sm ring-2 ring-red-200' : 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'"
+            class="px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center whitespace-nowrap flex-shrink-0"
+          >
+            <i class="ph ph-warning-circle mr-1 text-xs"></i>
+            이메일 오류 ({{ emailErrorReservations.length }})
+          </button>
+
+          <button
+            v-if="filterIssueType !== 'all'"
+            type="button"
+            @click="filterIssueType = 'all'"
+            class="px-3 py-1.5 rounded-full text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition flex items-center gap-0.5 whitespace-nowrap flex-shrink-0"
+            title="이슈 필터 해제"
+          >
+            <i class="ph ph-x"></i> 해제
+          </button>
+        </div>
+
+        <!-- 총 결과 수 -->
+        <div class="text-sm font-bold text-gray-600 whitespace-nowrap flex-shrink-0 ml-auto">
+          총 <span class="text-primary-700">{{ filteredReservations.length }}</span> 건
+        </div>
       </div>
     </div>
   </div>
@@ -110,10 +149,10 @@
              <option value="reservation_date">방문일</option>
              <option value="booking_request_date">예약요청일</option>
           </select>
-        <div class="flex items-center space-x-1 px-2 py-2 flex-1 justify-between">
-          <input type="date" v-model="filterDateStart" class="bg-transparent text-xs w-24 p-0 border-none focus:ring-0">
-          <span class="text-gray-400 text-xs">~</span>
-          <input type="date" v-model="filterDateEnd" class="bg-transparent text-xs w-24 p-0 border-none focus:ring-0">
+        <div class="flex items-center space-x-1 px-2 py-2 flex-1 justify-between min-w-0">
+          <input type="date" v-model="filterDateStart" class="bg-transparent text-xs flex-1 min-w-0 p-0 border-none focus:ring-0 text-center">
+          <span class="text-gray-400 text-xs px-0.5 flex-shrink-0">~</span>
+          <input type="date" v-model="filterDateEnd" class="bg-transparent text-xs flex-1 min-w-0 p-0 border-none focus:ring-0 text-center">
         </div>
       </div>
 
@@ -185,11 +224,86 @@
           </button>
         </div>
       </div>
+
+      <!-- 모바일 이슈 필터 -->
+      <div class="pt-3 border-t border-gray-100">
+        <span class="text-xs font-bold text-gray-500 uppercase block mb-2">이슈 필터</span>
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            @click="toggleIssueFilter('duplicate')"
+            :class="filterIssueType === 'duplicate' ? 'bg-purple-700 text-white shadow-sm ring-2 ring-purple-200' : 'bg-purple-50 text-purple-700 border border-purple-200'"
+            class="px-3 py-1.5 rounded-full text-xs font-medium transition flex items-center gap-1"
+          >
+            <i class="ph ph-users-three text-xs"></i> 중복 의심 ({{ duplicateGroupTotalCount }})
+          </button>
+          <button
+            type="button"
+            @click="toggleIssueFilter('email_error')"
+            :class="filterIssueType === 'email_error' ? 'bg-red-600 text-white shadow-sm ring-2 ring-red-200' : 'bg-red-50 text-red-700 border border-red-200'"
+            class="px-3 py-1.5 rounded-full text-xs font-medium transition flex items-center gap-1"
+          >
+            <i class="ph ph-warning-circle text-xs"></i> 이메일 오류 ({{ emailErrorReservations.length }})
+          </button>
+          <button
+            v-if="filterIssueType !== 'all'"
+            type="button"
+            @click="filterIssueType = 'all'"
+            class="px-3 py-1.5 rounded-full text-xs text-gray-500 bg-gray-100 hover:bg-gray-200"
+          >
+            필터 해제
+          </button>
+          <button
+            v-if="filterIssueType === 'duplicate' && duplicateGroups.length > 0"
+            type="button"
+            @click="toggleAllGroupsCollapse"
+            class="px-3 py-1.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-900 hover:bg-purple-200 border border-purple-300 transition flex items-center gap-1 shadow-sm ml-auto"
+          >
+            <i :class="areAllGroupsCollapsed ? 'ph ph-caret-double-down' : 'ph ph-caret-double-up'"></i>
+            <span>{{ areAllGroupsCollapsed ? '모든 그룹 펼치기' : '모든 그룹 접기' }}</span>
+          </button>
+        </div>
+      </div>
     </div>
   </details>
 
+  <!-- 플로팅 다중 선택 액션 바 (2건 이상 선택 시) -->
+  <transition
+    enter-active-class="transition ease-out duration-200"
+    enter-from-class="opacity-0 translate-y-4"
+    enter-to-class="opacity-100 translate-y-0"
+    leave-active-class="transition ease-in duration-150"
+    leave-from-class="opacity-100 translate-y-0"
+    leave-to-class="opacity-0 translate-y-4"
+  >
+    <div 
+      v-if="selectedReservationIds.length >= 2" 
+      class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-gray-900/95 text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-3 backdrop-blur border border-gray-700"
+    >
+      <span class="text-xs font-bold text-purple-300 flex items-center gap-1.5 whitespace-nowrap">
+        <i class="ph ph-check-square-offset text-lg"></i>
+        {{ selectedReservationIds.length }}건 선택됨
+      </span>
+      <div class="h-4 w-px bg-gray-700"></div>
+      <button 
+        type="button" 
+        @click="handleCreateManualDuplicateGroup" 
+        class="bg-purple-600 hover:bg-purple-500 text-white px-3.5 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 shadow whitespace-nowrap"
+      >
+        <i class="ph ph-users-three"></i> 중복 그룹으로 묶기
+      </button>
+      <button 
+        type="button" 
+        @click="selectedReservationIds = []" 
+        class="text-xs text-gray-400 hover:text-white transition px-2 py-1 whitespace-nowrap"
+      >
+        취소
+      </button>
+    </div>
+  </transition>
+
   <!-- 3. 예약 목록 영역 -->
-  <div id="mobile-scroll-container" class="flex-1 overflow-y-auto min-h-0 bg-white rounded-xl shadow border border-gray-200 relative"
+  <div id="mobile-scroll-container" class="md:flex-1 md:overflow-y-auto md:min-h-0 bg-white rounded-xl shadow border border-gray-200 relative"
        @touchstart="handleTouchStart"
        @touchmove="handleTouchMove"
        @touchend="handleTouchEnd">
@@ -213,6 +327,17 @@
       <table class="min-w-full divide-y divide-gray-200 table-fixed">
         <thead class="bg-gray-50 sticky top-0 z-20 shadow-sm">
           <tr>
+            <!-- 체크박스 전체 선택 열 -->
+            <th class="w-10 px-2 py-3 text-center bg-gray-50">
+              <input 
+                type="checkbox" 
+                :checked="isAllVisibleSelected" 
+                @change="toggleSelectAllVisible" 
+                class="rounded text-purple-600 focus:ring-purple-500 cursor-pointer" 
+                title="현재 목록 전체 선택"
+              >
+            </th>
+
             <th class="w-12 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">
               No.</th>
 
@@ -263,13 +388,224 @@
               <i v-if="sortKey === 'booking_request_date'" :class="sortOrder === 1 ? 'ph-caret-up' : 'ph-caret-down'" class="ph ml-1 text-primary-600"></i>
             </th>
 
-            <th class="w-20 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase">카카오톡</th>
+            <th class="w-24 px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase">
+              {{ filterIssueType === 'duplicate' ? '조치' : '카카오톡' }}
+            </th>
           </tr>
         </thead>
-        <tbody class="bg-white divide-y divide-gray-200 text-sm">
+
+        <!-- [CASE 1] 중복 의심 필터 활성화 시: 그룹별 다중 <tbody> 렌더링 -->
+        <template v-if="filterIssueType === 'duplicate'">
+          <tbody v-if="duplicateGroups.length === 0" class="bg-white">
+            <tr>
+              <td colspan="13" class="p-12 text-center text-gray-400">
+                <i class="ph ph-check-circle text-5xl mb-2 text-green-500 block"></i>
+                <p class="font-bold text-gray-700 text-base">감지된 중복 의심 예약이 없습니다.</p>
+                <p class="text-xs text-gray-400 mt-1">취소되지 않은 미래 예약 중 중복 건이 없습니다.</p>
+              </td>
+            </tr>
+          </tbody>
+          <tbody
+            v-for="(group, gIdx) in duplicateGroups"
+            :key="group.id"
+            class="divide-y divide-gray-200 border-b-4 border-gray-200 bg-white"
+          >
+            <!-- 그룹 헤더 바 (전체 컬럼 통합) -->
+            <tr class="bg-purple-50/90 border-t-2 border-purple-200 text-xs text-purple-950">
+              <td colspan="13" class="px-3 py-2.5">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <button 
+                      type="button" 
+                      @click.stop="toggleGroupCollapse(group.id)"
+                      class="p-1 rounded hover:bg-purple-200 text-purple-900 transition flex items-center justify-center font-bold text-xs"
+                      :title="collapsedGroupMap[group.id] ? '예약 목록 펼치기' : '예약 목록 접기'"
+                    >
+                      <i :class="collapsedGroupMap[group.id] ? 'ph ph-caret-right text-base' : 'ph ph-caret-down text-base'"></i>
+                    </button>
+                    <span class="px-2 py-0.5 rounded-full font-bold bg-purple-200 text-purple-900 text-xs">
+                      그룹 #{{ gIdx + 1 }}
+                    </span>
+                    <span class="font-bold text-sm text-gray-900">{{ group.title }}</span>
+                    <span 
+                      class="text-xs px-2 py-0.5 rounded font-semibold"
+                      :class="group.group_type === 'manual' ? 'bg-indigo-100 text-indigo-800' : 'bg-purple-100 text-purple-800'"
+                    >
+                      {{ group.group_type === 'manual' ? '수동 묶음' : (group.matchLabel || '자동 감지') }} (총 {{ group.reservations.length }}건)
+                    </span>
+                    <span 
+                      v-if="group.mail_sent_at"
+                      class="text-xs px-2 py-0.5 rounded font-semibold bg-green-100 text-green-800 border border-green-200 flex items-center gap-1"
+                    >
+                      <i class="ph ph-envelope-simple-check"></i>
+                      안내메일 발송됨 ({{ formatDate(group.mail_sent_at, 'datetime') }})
+                    </span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button 
+                      type="button"
+                      @click.stop="openDuplicateMailModal(group)" 
+                      class="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white font-semibold transition shadow-sm text-xs flex items-center gap-1"
+                      :title="group.mail_sent_at ? '중복확인 안내메일 재발송' : '중복확인 안내메일 발송'"
+                    >
+                      <i class="ph ph-paper-plane-tilt"></i>
+                      <span>{{ group.mail_sent_at ? '메일 재발송' : '확인메일 발송' }}</span>
+                    </button>
+                    <button 
+                      v-if="group.group_type === 'manual'"
+                      type="button"
+                      @click="handleRemoveManualGroup(group)"
+                      class="px-2.5 py-1 rounded bg-white border border-gray-300 hover:bg-gray-50 text-gray-600 font-semibold transition shadow-sm text-xs"
+                    >
+                      수동 묶음 해제
+                    </button>
+                    <button 
+                      type="button"
+                      @click="clearDuplicateGroup(group)" 
+                      class="px-2.5 py-1 rounded bg-white border border-purple-300 hover:bg-purple-100 text-purple-900 font-semibold transition shadow-sm text-xs flex items-center gap-1"
+                    >
+                      <i class="ph ph-shield-check"></i> 전체 중복아님
+                    </button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <!-- 접힘 상태일 때 표시할 안내 행 -->
+            <tr 
+              v-if="collapsedGroupMap[group.id]" 
+              class="bg-gray-50/50 cursor-pointer hover:bg-purple-50/40 text-xs text-gray-500 transition-colors"
+              @click="toggleGroupCollapse(group.id)"
+            >
+              <td colspan="13" class="px-4 py-2 text-center">
+                <span class="inline-flex items-center gap-1.5 text-xs text-purple-700 hover:underline font-semibold">
+                  <i class="ph ph-caret-right"></i> {{ group.reservations.length }}건 예약 접힘 (클릭하여 펼치기)
+                </span>
+              </td>
+            </tr>
+
+            <!-- 그룹 소속 예약 행들 (펼침 상태) -->
+            <template v-else>
+            <tr
+              v-for="(res, rIdx) in group.reservations"
+              :key="res.id"
+              @click="openReservationModal(res)"
+              class="hover:bg-purple-50/30 cursor-pointer border-l-4 border-purple-500 transition-colors"
+            >
+              <!-- 체크박스 -->
+              <td class="px-2 py-3 text-center" @click.stop>
+                <input type="checkbox" :value="res.id" v-model="selectedReservationIds" class="rounded text-purple-600 focus:ring-purple-500 cursor-pointer">
+              </td>
+
+              <!-- No. -->
+              <td class="px-2 py-3 whitespace-nowrap text-center text-xs text-gray-400 font-mono">
+                {{ rIdx + 1 }}
+              </td>
+
+              <!-- 방문일시 -->
+              <td class="px-2 py-3 whitespace-nowrap sticky left-0 group-hover:bg-purple-50/30 transition-colors z-10 border-r border-gray-100 bg-white">
+                <div class="flex flex-col">
+                  <span class="font-bold text-gray-900" :class="{ 'text-gray-400': res.status === 'cancel' }">{{ formatDate(res.reservation_date, 'date') }}</span>
+                  <span class="text-xs text-gray-500 font-mono">{{ formatDate(res.reservation_date, 'time') }}</span>
+                </div>
+              </td>
+
+              <!-- 지점 -->
+              <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-600 font-medium">
+                {{ getBranchName(res.branch_id) }}
+              </td>
+
+              <!-- 고객명 -->
+              <td class="px-2 py-3 whitespace-nowrap">
+                <div class="flex items-center gap-1">
+                  <span class="font-bold text-gray-900 truncate max-w-[100px]" :title="res.customer_name">{{ res.customer_name }}</span>
+                  <span v-if="!res.is_read" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500 text-white animate-pulse">N</span>
+                </div>
+              </td>
+
+              <!-- 이메일 -->
+              <td class="px-2 py-3 whitespace-nowrap text-xs truncate max-w-[140px]" :title="res.email">
+                <span :class="{'text-red-600 font-bold underline': hasEmailError(res), 'text-gray-500': !hasEmailError(res)}">
+                  {{ res.email }}
+                </span>
+              </td>
+
+              <!-- 인원 -->
+              <td class="px-2 py-3 whitespace-nowrap text-center text-gray-700 font-bold">{{ res.pax }}</td>
+
+              <!-- 상태 -->
+              <td class="px-2 py-3 whitespace-nowrap text-center" @click.stop="markAsReadOnClick(res)">
+                <select
+                  :value="res.status"
+                  @change="handleInlineStatusChange(res, 'status', $event)"
+                  class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-primary-500"
+                  :class="{ 'bg-green-100 text-green-700 border-green-200': res.status === 'confirm', 'bg-red-100 text-red-700 border-red-200': res.status === 'cancel', 'bg-yellow-100 text-yellow-800 border-yellow-300': res.status === 'pending' }"
+                >
+                  <option value="pending">대기</option>
+                  <option value="confirm">예약</option>
+                  <option value="cancel">취소</option>
+                </select>
+              </td>
+
+              <!-- 예약금 상태 -->
+              <td class="px-2 py-3 whitespace-nowrap text-center" @click.stop="markAsReadOnClick(res)">
+                <select
+                  :value="res.deposit_status"
+                  @change="handleInlineStatusChange(res, 'deposit_status', $event)"
+                  class="text-xs border rounded px-1 py-1 font-bold cursor-pointer focus:ring-2 focus:ring-amber-500"
+                  :class="res.deposit_status === 'pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-100 text-green-800 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200')"
+                >
+                  <option value="n/a">N/A</option>
+                  <option value="pending">대기</option>
+                  <option value="confirm">확정</option>
+                  <option value="refund">환불</option>
+                </select>
+              </td>
+
+              <!-- 고객 메모 -->
+              <td class="px-2 py-3 text-xs text-gray-500 truncate max-w-[140px]" :title="res.notes">{{ res.notes || '-' }}</td>
+
+              <!-- 관리자 메모 -->
+              <td class="px-2 py-3 text-xs text-gray-500 max-w-[140px]">
+                <div class="flex items-center gap-1">
+                  <i v-if="res.private_notes" class="ph-fill ph-lock-key text-gray-600 text-sm flex-shrink-0" :title="'비공개 메모: ' + res.private_notes"></i>
+                  <span v-if="res.internal_notes" class="text-red-600 font-medium bg-red-50 px-1 rounded truncate" :title="res.internal_notes">{{ res.internal_notes }}</span>
+                  <span v-else-if="!res.private_notes">-</span>
+                </div>
+              </td>
+
+              <!-- 예약요청일 -->
+              <td class="px-2 py-3 whitespace-nowrap text-center text-xs text-gray-500 font-mono">
+                {{ formatDate(res.booking_request_date || res.created_at, 'date') }}
+              </td>
+
+              <!-- 개별 조치 열 -->
+              <td class="px-2 py-3 whitespace-nowrap text-center" @click.stop>
+                <button 
+                  type="button" 
+                  @click="excludeSingleReservationFromGroup(res)" 
+                  class="text-[11px] px-2 py-1 text-gray-600 hover:text-purple-800 hover:bg-purple-100 rounded border border-gray-200 transition font-medium"
+                  title="이 예약만 중복 그룹에서 제외"
+                >
+                  이 건 제외
+                </button>
+              </td>
+            </tr>
+            </template>
+          </tbody>
+        </template>
+
+        <!-- [CASE 2] 일반 목록일 때 (기존 렌더링 유지 + 체크박스/중복/이메일 배지) -->
+        <tbody v-else class="bg-white divide-y divide-gray-200 text-sm">
           <tr v-for="(res, index) in paginatedReservations" :key="res.id" @click="openReservationModal(res)"
             class="group hover:bg-primary-50/50 cursor-pointer transition-colors duration-150"
             :class="{ 'bg-gray-50': res.status === 'cancel', 'bg-amber-50': res.status === 'pending' }">
+            
+            <!-- 체크박스 -->
+            <td class="px-2 py-3 text-center" @click.stop>
+              <input type="checkbox" :value="res.id" v-model="selectedReservationIds" class="rounded text-purple-600 focus:ring-purple-500 cursor-pointer">
+            </td>
+
             <!-- 1. No. -->
             <td class="px-2 py-3 whitespace-nowrap text-center text-xs text-gray-500">
               {{ (currentPage - 1) * itemsPerPage + index + 1 }}
@@ -292,17 +628,25 @@
 
             <!-- 4. 고객명 -->
             <td class="px-2 py-3 whitespace-nowrap">
-              <div class="flex items-center">
+              <div class="flex items-center gap-1">
                 <span class="font-bold text-gray-900 truncate max-w-[100px]" :title="res.customer_name">
-                      {{ res.customer_name }}
-                  </span>
-                <span v-if="!res.is_read" class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500 text-white animate-pulse">N</span>
+                  {{ res.customer_name }}
+                </span>
+                <span v-if="duplicateGroupMap[res.id]" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200 flex-shrink-0" title="중복 의심 예약">중복</span>
+                <span v-if="!res.is_read" class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500 text-white animate-pulse">N</span>
               </div>
             </td>
 
             <!-- 5. 이메일 -->
-            <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-500 truncate max-w-[140px]" :title="res.email">{{
-              res.email }}</td>
+            <td class="px-2 py-3 whitespace-nowrap text-xs truncate max-w-[140px]" :title="res.email">
+              <span v-if="hasEmailError(res)" class="text-red-600 font-bold underline flex items-center gap-1 cursor-pointer" :title="getEmailErrorMsg(res)">
+                {{ res.email }}
+                <i class="ph ph-warning-circle text-sm text-red-500"></i>
+              </span>
+              <span v-else class="text-gray-500">
+                {{ res.email }}
+              </span>
+            </td>
 
             <!-- 6. 인원 -->
             <td class="px-2 py-3 whitespace-nowrap text-center text-gray-700 font-bold">{{ res.pax }}</td>
@@ -318,7 +662,8 @@
                 <option value="pending">대기</option>
                 <option value="confirm">예약</option>
                 <option value="cancel">취소</option>
-              </select>            </td>
+              </select>
+            </td>
 
             <!-- 8. 예약금 상태 -->
             <td class="px-2 py-3 whitespace-nowrap text-center" @click.stop="markAsReadOnClick(res)">
@@ -384,132 +729,342 @@
     </div>
 
     <!-- B. 모바일 카드 뷰 (md 미만) -->
-    <div class="md:hidden p-4 space-y-3 pb-20">
-      <div v-for="res in paginatedReservations" :key="res.id" @click="openReservationModal(res)"
-        class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 active:bg-gray-50 active:scale-[0.99] transition-all duration-150 relative">
-        <!-- Card Header -->
-        <div class="flex justify-between items-start mb-3">
-          <div class="flex items-center space-x-3">
-            <div class="p-2 bg-primary-100 rounded-lg text-primary-700">
-              <i class="ph-fill ph-user text-xl"></i>
-            </div>
-            <div>
-              <div class="flex items-center">
-                <span class="text-base font-bold text-gray-900 leading-tight">{{ res.customer_name }}</span>
-                <!-- N Badge -->
-                <span v-if="!res.is_read" class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500 text-white animate-pulse">N</span>
+    <div class="md:hidden p-4 space-y-4 pb-20">
+      <!-- [CASE 1] 모바일 중복 의심 필터 활성화 시: 그룹별 묶음 렌더링 -->
+      <template v-if="filterIssueType === 'duplicate'">
+        <div v-if="duplicateGroups.length === 0" class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center text-gray-400">
+          <i class="ph ph-check-circle text-5xl mb-2 text-green-500 inline-block"></i>
+          <p class="font-bold text-gray-700 text-base">감지된 중복 의심 예약이 없습니다.</p>
+          <p class="text-xs text-gray-400 mt-1">취소되지 않은 미래 예약 중 중복 건이 없습니다.</p>
+        </div>
+
+        <div v-for="(group, gIdx) in duplicateGroups" :key="group.id" class="space-y-2.5">
+          <!-- 모바일 그룹 헤더 바 -->
+          <div class="bg-purple-50 rounded-xl p-3 border border-purple-200 flex flex-col gap-2 shadow-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <button 
+                  type="button" 
+                  @click.stop="toggleGroupCollapse(group.id)"
+                  class="p-0.5 rounded hover:bg-purple-200 text-purple-900 transition flex items-center justify-center font-bold text-xs"
+                  :title="collapsedGroupMap[group.id] ? '펼치기' : '접기'"
+                >
+                  <i :class="collapsedGroupMap[group.id] ? 'ph ph-caret-right text-sm' : 'ph ph-caret-down text-sm'"></i>
+                </button>
+                <span class="px-2 py-0.5 rounded-full font-bold bg-purple-200 text-purple-900 text-xs">
+                  그룹 #{{ gIdx + 1 }}
+                </span>
+                <span class="font-bold text-xs text-gray-900">{{ group.title }}</span>
               </div>
-              <p class="text-xs text-gray-500 mt-0.5">
-                <i class="ph-users-fill inline align-middle text-gray-400"></i> {{ res.pax }}명
-              </p>
+              <span class="text-[11px] px-2 py-0.5 rounded font-semibold bg-purple-100 text-purple-800">
+                총 {{ group.reservations.length }}건
+              </span>
+            </div>
+            <div class="flex items-center justify-between gap-2 pt-1.5 border-t border-purple-200/60">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="text-[11px] text-purple-700 font-medium">
+                  {{ group.group_type === 'manual' ? '수동 묶음' : (group.matchLabel || '자동 감지') }}
+                </span>
+                <span 
+                  v-if="group.mail_sent_at"
+                  class="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-green-100 text-green-800 border border-green-200 flex items-center gap-0.5"
+                >
+                  <i class="ph ph-envelope-simple-check"></i>
+                  안내메일 발송됨 ({{ formatDate(group.mail_sent_at, 'datetime') }})
+                </span>
+              </div>
+              <div class="flex items-center gap-1.5 flex-wrap justify-end">
+                <button 
+                  type="button"
+                  @click.stop="openDuplicateMailModal(group)" 
+                  class="px-2 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs flex items-center gap-1 shadow-sm"
+                  :title="group.mail_sent_at ? '중복확인 안내메일 재발송' : '중복확인 안내메일 발송'"
+                >
+                  <i class="ph ph-paper-plane-tilt"></i>
+                  <span>{{ group.mail_sent_at ? '재발송' : '확인메일' }}</span>
+                </button>
+                <button 
+                  v-if="group.group_type === 'manual'"
+                  type="button"
+                  @click.stop="handleRemoveManualGroup(group)"
+                  class="px-2 py-1 rounded bg-white border border-gray-300 text-gray-600 font-medium text-xs shadow-sm"
+                >
+                  해제
+                </button>
+                <button 
+                  type="button"
+                  @click.stop="clearDuplicateGroup(group)" 
+                  class="px-2 py-1 rounded bg-white border border-purple-300 text-purple-900 font-semibold text-xs flex items-center gap-1 shadow-sm"
+                >
+                  <i class="ph ph-shield-check"></i> 중복아님
+                </button>
+              </div>
             </div>
           </div>
 
-          <!-- [FIX] 모바일 카드뷰 상태 (레이아웃 개선) -->
-          <div class="flex flex-col items-end space-y-2 mt-0.5 mr-1">
-            <!-- 1. 예약 상태 -->
-            <div class="flex items-center justify-end space-x-2">
-              <span class="text-xs text-gray-400 font-medium tracking-tight">예약</span>
-              <select
-                :value="res.status"
-                @change="handleInlineStatusChange(res, 'status', $event)"
-                @click.stop="markAsReadOnClick(res)"
-                class="h-7 w-20 text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center"
-                :class="{ 'bg-green-50 text-green-700 border-green-200': res.status === 'confirm', 'bg-red-50 text-red-700 border-red-200': res.status === 'cancel', 'bg-yellow-50 text-yellow-700 border-yellow-200': res.status === 'pending' }"
-              >
-                <option value="pending">⏳ 대기</option>
-                <option value="confirm">✅ 예약</option>
-                <option value="cancel">🚫 취소</option>
-              </select>
-            </div>
-
-            <!-- 2. 예약금 상태 -->
-            <div class="flex items-center justify-end space-x-2">
-              <span class="text-xs text-gray-400 font-medium tracking-tight">예약금</span>
-              <select
-                :value="res.deposit_status"
-                @change="handleInlineStatusChange(res, 'deposit_status', $event)"
-                @click.stop="markAsReadOnClick(res)"
-                class="h-7 w-20 text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center"
-                :class="res.deposit_status === 'pending' ? 'bg-amber-50 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-gray-50 text-gray-600 border-gray-100')"
-              >
-                <option value="n/a">⚪ N/A</option>
-                <option value="pending">🟡 대기</option>
-                <option value="confirm">🟢 확정</option>
-                <option value="refund">🔵 환불</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <!-- Card Body -->
-        <div class="space-y-2 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100">
-          <div class="flex items-center">
-            <i class="ph ph-map-pin w-5 text-gray-400 text-lg"></i><span class="font-medium text-gray-700">{{ getBranchName(res.branch_id) }}</span>
-          </div>
-          <div class="flex items-center">
-            <i class="ph ph-clock w-5 text-gray-400 text-lg"></i><span class="font-medium">{{ formatDate(res.reservation_date, 'date') }} | {{ formatDate(res.reservation_date, 'time') }}</span>
-          </div>
-          <!-- 이메일 정보 (모바일) -->
-          <div class="flex items-center" v-if="res.email">
-            <i class="ph ph-envelope-simple w-5 text-gray-400 text-lg"></i>
-            <span class="text-xs truncate">{{ res.email }}</span>
-          </div>
-          <!-- 연락처 정보 (모바일) -->
-          <div class="flex items-center" v-if="res.phone_number">
-            <i class="ph ph-phone w-5 text-gray-400 text-lg"></i>
-            <span class="text-xs truncate">{{ res.phone_number }}</span>
-          </div>
-          <!-- 메모 -->
-          <div class="flex items-center" v-if="res.notes">
-            <i class="ph ph-note w-5 text-gray-400 text-lg flex-shrink-0"></i>
-            <span class="text-xs line-clamp-2 break-all">{{ res.notes }}</span>
-          </div>
-          <!-- 관리자 메모 -->
-          <div class="flex items-center" v-if="res.internal_notes">
-            <i class="ph ph-lock-key w-5 text-red-400 text-lg flex-shrink-0"></i>
-            <span class="text-xs text-red-600 font-medium line-clamp-2 break-all">{{ res.internal_notes }}</span>
-          </div>
-          <!-- 비공개 메모 (어드민 전용) -->
-          <div class="flex items-center" v-if="res.private_notes">
-            <i class="ph-fill ph-lock-key w-5 text-gray-500 text-lg flex-shrink-0"></i>
-            <span class="text-xs text-gray-600 line-clamp-2 break-all">{{ res.private_notes }}</span>
-          </div>
-          <!-- 예약요청일 (모바일) -->
-          <div class="flex items-center text-xs text-gray-400 mt-1 pt-1 border-t border-gray-200">
-            <i class="ph ph-calendar-plus w-5 text-lg"></i>
-            <span>예약요청일: {{ formatDate(res.booking_request_date || res.created_at, 'date') }}</span>
-          </div>
-        </div>
-
-        <!-- Mobile Actions -->
-        <div class="mt-3 pt-2 border-t border-gray-100 flex justify-end space-x-2 items-center">
-          <span v-if="res.message_sent_at" class="text-[10px] text-gray-400 mr-auto font-mono">전송: {{ formatDate(res.message_sent_at, 'date') }}</span>
-          <!-- Manual Confirm Button -->
-          <button
-            @click.stop="confirmKakao($event, res)"
-            class="px-3 py-1.5 rounded text-xs font-medium bg-white border border-yellow-400 text-yellow-800 flex items-center hover:bg-yellow-50 transition"
+          <!-- 접힘 상태일 때 안내 바 -->
+          <div 
+            v-if="collapsedGroupMap[group.id]" 
+            @click="toggleGroupCollapse(group.id)" 
+            class="text-center py-2 px-3 bg-purple-50/40 border border-purple-100 rounded-xl text-xs text-purple-700 font-medium cursor-pointer hover:bg-purple-100/50 flex items-center justify-center gap-1 transition-colors"
           >
-            <i class="ph ph-check-circle mr-1.5 text-lg"></i> 완료
-          </button>
-          <!-- Send Button -->
-          <button
-            @click.stop="sendKakao($event, res)"
-            class="px-3 py-1.5 rounded text-xs font-medium border border-yellow-200 text-yellow-700 bg-yellow-50 flex items-center hover:bg-yellow-100 transition"
-          >
-            <i class="ph ph-chat-circle-dots mr-1.5 text-lg"></i> 전송
-          </button>
+            <i class="ph ph-caret-right"></i> {{ group.reservations.length }}건 예약 접힘 (터치하여 펼치기)
+          </div>
+
+          <!-- 모바일 그룹 소속 카드 목록 (펼침 상태) -->
+          <div v-else class="space-y-2.5">
+          <div v-for="res in group.reservations" :key="res.id" @click="openReservationModal(res)"
+            class="bg-white rounded-xl shadow-sm border border-purple-100 p-4 active:bg-gray-50 active:scale-[0.99] transition-all duration-150 relative">
+            <!-- Card Header -->
+            <div class="flex justify-between items-start mb-3 gap-2">
+              <div class="flex items-center space-x-2.5 min-w-0 flex-1">
+                <div class="p-2 bg-purple-100 rounded-lg text-purple-700 flex-shrink-0">
+                  <i class="ph-fill ph-user text-xl"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span v-if="!res.is_read" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500 text-white animate-pulse flex-shrink-0">N</span>
+                    <span class="text-base font-bold text-gray-900 leading-tight truncate min-w-0 flex-1" :title="res.customer_name">{{ res.customer_name }}</span>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200 flex-shrink-0">중복</span>
+                  </div>
+                  <p class="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                    <i class="ph-users-fill inline align-middle text-gray-400"></i> {{ res.pax }}명
+                  </p>
+                </div>
+              </div>
+
+              <!-- 상태 셀렉트 (축소 방지 flex-shrink-0) -->
+              <div class="flex flex-col items-end space-y-1.5 flex-shrink-0">
+                <div class="flex items-center justify-end space-x-1.5">
+                  <span class="text-xs text-gray-400 font-medium tracking-tight whitespace-nowrap flex-shrink-0">예약</span>
+                  <select
+                    :value="res.status"
+                    @change="handleInlineStatusChange(res, 'status', $event)"
+                    @click.stop="markAsReadOnClick(res)"
+                    class="h-7 w-[78px] text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center flex-shrink-0"
+                    :class="{ 'bg-green-50 text-green-700 border-green-200': res.status === 'confirm', 'bg-red-50 text-red-700 border-red-200': res.status === 'cancel', 'bg-yellow-50 text-yellow-700 border-yellow-200': res.status === 'pending' }"
+                  >
+                    <option value="pending">⏳ 대기</option>
+                    <option value="confirm">✅ 예약</option>
+                    <option value="cancel">🚫 취소</option>
+                  </select>
+                </div>
+
+                <div class="flex items-center justify-end space-x-1.5">
+                  <span class="text-xs text-gray-400 font-medium tracking-tight whitespace-nowrap flex-shrink-0">예약금</span>
+                  <select
+                    :value="res.deposit_status"
+                    @change="handleInlineStatusChange(res, 'deposit_status', $event)"
+                    @click.stop="markAsReadOnClick(res)"
+                    class="h-7 w-[78px] text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center flex-shrink-0"
+                    :class="res.deposit_status === 'pending' ? 'bg-amber-50 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-gray-50 text-gray-600 border-gray-100')"
+                  >
+                    <option value="n/a">⚪ N/A</option>
+                    <option value="pending">🟡 대기</option>
+                    <option value="confirm">🟢 확정</option>
+                    <option value="refund">🔵 환불</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card Body -->
+            <div class="space-y-2 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100">
+              <div class="flex items-center">
+                <i class="ph ph-map-pin w-5 text-gray-400 text-lg flex-shrink-0"></i><span class="font-medium text-gray-700">{{ getBranchName(res.branch_id) }}</span>
+              </div>
+              <div class="flex items-center">
+                <i class="ph ph-clock w-5 text-gray-400 text-lg flex-shrink-0"></i><span class="font-medium">{{ formatDate(res.reservation_date, 'date') }} | {{ formatDate(res.reservation_date, 'time') }}</span>
+              </div>
+              <div class="flex items-center" v-if="res.email">
+                <i class="ph ph-envelope-simple w-5 text-gray-400 text-lg flex-shrink-0"></i>
+                <span class="text-xs truncate flex items-center gap-1" :class="{'text-red-600 font-bold underline': hasEmailError(res), 'text-gray-600': !hasEmailError(res)}">
+                  {{ res.email }}
+                  <i v-if="hasEmailError(res)" class="ph ph-warning-circle text-sm text-red-500 flex-shrink-0" :title="getEmailErrorMsg(res)"></i>
+                </span>
+              </div>
+              <div class="flex items-center" v-if="res.phone_number">
+                <i class="ph ph-phone w-5 text-gray-400 text-lg flex-shrink-0"></i>
+                <span class="text-xs truncate">{{ res.phone_number }}</span>
+              </div>
+              <div class="flex items-center" v-if="res.notes">
+                <i class="ph ph-note w-5 text-gray-400 text-lg flex-shrink-0"></i>
+                <span class="text-xs line-clamp-2 break-all">{{ res.notes }}</span>
+              </div>
+              <div class="flex items-center" v-if="res.internal_notes">
+                <i class="ph ph-lock-key w-5 text-red-400 text-lg flex-shrink-0"></i>
+                <span class="text-xs text-red-600 font-medium line-clamp-2 break-all">{{ res.internal_notes }}</span>
+              </div>
+              <div class="flex items-center" v-if="res.private_notes">
+                <i class="ph-fill ph-lock-key w-5 text-gray-500 text-lg flex-shrink-0"></i>
+                <span class="text-xs text-gray-600 line-clamp-2 break-all">{{ res.private_notes }}</span>
+              </div>
+              <div class="flex items-center text-xs text-gray-400 mt-1 pt-1 border-t border-gray-200">
+                <i class="ph ph-calendar-plus w-5 text-lg flex-shrink-0"></i>
+                <span>예약요청일: {{ formatDate(res.booking_request_date || res.created_at, 'date') }}</span>
+              </div>
+            </div>
+
+            <!-- Mobile Actions -->
+            <div class="mt-3 pt-2 border-t border-gray-100 flex justify-end space-x-2 items-center">
+              <button
+                type="button"
+                @click.stop="excludeSingleReservationFromGroup(res)"
+                class="px-2.5 py-1.5 rounded text-xs font-medium border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 transition mr-auto flex items-center gap-1 shadow-sm"
+                title="이 예약만 중복 그룹에서 제외"
+              >
+                <i class="ph ph-user-minus"></i> 제외
+              </button>
+              <button
+                @click.stop="confirmKakao($event, res)"
+                class="px-3 py-1.5 rounded text-xs font-medium bg-white border border-yellow-400 text-yellow-800 flex items-center hover:bg-yellow-50 transition"
+              >
+                <i class="ph ph-check-circle mr-1.5 text-lg"></i> 완료
+              </button>
+              <button
+                @click.stop="sendKakao($event, res)"
+                class="px-3 py-1.5 rounded text-xs font-medium border border-yellow-200 text-yellow-700 bg-yellow-50 flex items-center hover:bg-yellow-100 transition"
+              >
+                <i class="ph ph-chat-circle-dots mr-1.5 text-lg"></i> 전송
+              </button>
+            </div>
+          </div>
+          </div>
         </div>
-      </div>
-      <div v-if="paginatedReservations.length === 0"
-        class="flex flex-col items-center justify-center py-10 text-gray-400">
-        <p class="text-sm">검색 결과가 없습니다.</p>
-      </div>
+      </template>
+
+      <!-- [CASE 2] 일반 예약 목록 뷰 (중복 의심 필터 아닐 때) -->
+      <template v-else>
+        <div v-for="res in paginatedReservations" :key="res.id" @click="openReservationModal(res)"
+          class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 active:bg-gray-50 active:scale-[0.99] transition-all duration-150 relative">
+          <!-- Card Header -->
+          <div class="flex justify-between items-start mb-3 gap-2">
+            <div class="flex items-center space-x-2.5 min-w-0 flex-1">
+              <div class="p-2 bg-primary-100 rounded-lg text-primary-700 flex-shrink-0">
+                <i class="ph-fill ph-user text-xl"></i>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <span v-if="!res.is_read" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500 text-white animate-pulse flex-shrink-0">N</span>
+                  <span class="text-base font-bold text-gray-900 leading-tight truncate min-w-0 flex-1" :title="res.customer_name">{{ res.customer_name }}</span>
+                  <!-- 중복 뱃지 (모바일) -->
+                  <span v-if="duplicateGroupMap[res.id]" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200 flex-shrink-0" title="중복 의심 예약">중복</span>
+                </div>
+                <p class="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                  <i class="ph-users-fill inline align-middle text-gray-400"></i> {{ res.pax }}명
+                </p>
+              </div>
+            </div>
+
+            <!-- 상태 셀렉트 (축소 방지 flex-shrink-0 및 레이블 nowrap) -->
+            <div class="flex flex-col items-end space-y-1.5 flex-shrink-0">
+              <!-- 1. 예약 상태 -->
+              <div class="flex items-center justify-end space-x-1.5">
+                <span class="text-xs text-gray-400 font-medium tracking-tight whitespace-nowrap flex-shrink-0">예약</span>
+                <select
+                  :value="res.status"
+                  @change="handleInlineStatusChange(res, 'status', $event)"
+                  @click.stop="markAsReadOnClick(res)"
+                  class="h-7 w-[78px] text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center flex-shrink-0"
+                  :class="{ 'bg-green-50 text-green-700 border-green-200': res.status === 'confirm', 'bg-red-50 text-red-700 border-red-200': res.status === 'cancel', 'bg-yellow-50 text-yellow-700 border-yellow-200': res.status === 'pending' }"
+                >
+                  <option value="pending">⏳ 대기</option>
+                  <option value="confirm">✅ 예약</option>
+                  <option value="cancel">🚫 취소</option>
+                </select>
+              </div>
+
+              <!-- 2. 예약금 상태 -->
+              <div class="flex items-center justify-end space-x-1.5">
+                <span class="text-xs text-gray-400 font-medium tracking-tight whitespace-nowrap flex-shrink-0">예약금</span>
+                <select
+                  :value="res.deposit_status"
+                  @change="handleInlineStatusChange(res, 'deposit_status', $event)"
+                  @click.stop="markAsReadOnClick(res)"
+                  class="h-7 w-[78px] text-xs font-bold rounded border px-1 appearance-none focus:outline-none cursor-pointer text-center flex-shrink-0"
+                  :class="res.deposit_status === 'pending' ? 'bg-amber-50 text-amber-800 border-amber-200' : (res.deposit_status === 'confirm' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-gray-50 text-gray-600 border-gray-100')"
+                >
+                  <option value="n/a">⚪ N/A</option>
+                  <option value="pending">🟡 대기</option>
+                  <option value="confirm">🟢 확정</option>
+                  <option value="refund">🔵 환불</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card Body -->
+          <div class="space-y-2 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100">
+            <div class="flex items-center">
+              <i class="ph ph-map-pin w-5 text-gray-400 text-lg flex-shrink-0"></i><span class="font-medium text-gray-700">{{ getBranchName(res.branch_id) }}</span>
+            </div>
+            <div class="flex items-center">
+              <i class="ph ph-clock w-5 text-gray-400 text-lg flex-shrink-0"></i><span class="font-medium">{{ formatDate(res.reservation_date, 'date') }} | {{ formatDate(res.reservation_date, 'time') }}</span>
+            </div>
+            <!-- 이메일 정보 (모바일 에러 강조) -->
+            <div class="flex items-center" v-if="res.email">
+              <i class="ph ph-envelope-simple w-5 text-gray-400 text-lg flex-shrink-0"></i>
+              <span class="text-xs truncate flex items-center gap-1" :class="{'text-red-600 font-bold underline': hasEmailError(res), 'text-gray-600': !hasEmailError(res)}">
+                {{ res.email }}
+                <i v-if="hasEmailError(res)" class="ph ph-warning-circle text-sm text-red-500 flex-shrink-0" :title="getEmailErrorMsg(res)"></i>
+              </span>
+            </div>
+            <!-- 연락처 정보 (모바일) -->
+            <div class="flex items-center" v-if="res.phone_number">
+              <i class="ph ph-phone w-5 text-gray-400 text-lg flex-shrink-0"></i>
+              <span class="text-xs truncate">{{ res.phone_number }}</span>
+            </div>
+            <!-- 메모 -->
+            <div class="flex items-center" v-if="res.notes">
+              <i class="ph ph-note w-5 text-gray-400 text-lg flex-shrink-0"></i>
+              <span class="text-xs line-clamp-2 break-all">{{ res.notes }}</span>
+            </div>
+            <!-- 관리자 메모 -->
+            <div class="flex items-center" v-if="res.internal_notes">
+              <i class="ph ph-lock-key w-5 text-red-400 text-lg flex-shrink-0"></i>
+              <span class="text-xs text-red-600 font-medium line-clamp-2 break-all">{{ res.internal_notes }}</span>
+            </div>
+            <!-- 비공개 메모 (어드민 전용) -->
+            <div class="flex items-center" v-if="res.private_notes">
+              <i class="ph-fill ph-lock-key w-5 text-gray-500 text-lg flex-shrink-0"></i>
+              <span class="text-xs text-gray-600 line-clamp-2 break-all">{{ res.private_notes }}</span>
+            </div>
+            <!-- 예약요청일 (모바일) -->
+            <div class="flex items-center text-xs text-gray-400 mt-1 pt-1 border-t border-gray-200">
+              <i class="ph ph-calendar-plus w-5 text-lg flex-shrink-0"></i>
+              <span>예약요청일: {{ formatDate(res.booking_request_date || res.created_at, 'date') }}</span>
+            </div>
+          </div>
+
+          <!-- Mobile Actions -->
+          <div class="mt-3 pt-2 border-t border-gray-100 flex justify-end space-x-2 items-center">
+            <span v-if="res.message_sent_at" class="text-[10px] text-gray-400 mr-auto font-mono">전송: {{ formatDate(res.message_sent_at, 'date') }}</span>
+            <!-- Manual Confirm Button -->
+            <button
+              @click.stop="confirmKakao($event, res)"
+              class="px-3 py-1.5 rounded text-xs font-medium bg-white border border-yellow-400 text-yellow-800 flex items-center hover:bg-yellow-50 transition"
+            >
+              <i class="ph ph-check-circle mr-1.5 text-lg"></i> 완료
+            </button>
+            <!-- Send Button -->
+            <button
+              @click.stop="sendKakao($event, res)"
+              class="px-3 py-1.5 rounded text-xs font-medium border border-yellow-200 text-yellow-700 bg-yellow-50 flex items-center hover:bg-yellow-100 transition"
+            >
+              <i class="ph ph-chat-circle-dots mr-1.5 text-lg"></i> 전송
+            </button>
+          </div>
+        </div>
+        <div v-if="paginatedReservations.length === 0"
+          class="flex flex-col items-center justify-center py-10 text-gray-400">
+          <p class="text-sm">검색 결과가 없습니다.</p>
+        </div>
+      </template>
     </div>
   </div>
 
   <!-- 4. Pagination -->
-  <div v-if="hasMultiplePages"
+  <div v-if="hasMultiplePages && filterIssueType !== 'duplicate'"
     class="flex-shrink-0 bg-white border-t border-gray-200 p-3 flex justify-center items-center space-x-4 shadow-inner z-30">
     <button @click="prevPage" :disabled="currentPage === 1" class="w-10 h-10 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-30"><i class="ph ph-caret-left text-xl"></i></button>
     <span class="text-sm font-bold text-gray-700 font-mono bg-gray-50 px-3 py-1 rounded border border-gray-200">{{ currentPage }} / {{ totalPage }}</span>

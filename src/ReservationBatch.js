@@ -268,7 +268,14 @@ function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
   const dbRow = Util.convertObjectToRow(reservationObj, dbHeaders);
   dbSheet.appendRow(dbRow);
 
-  // 9. 슬롯 동기화 (Source Calendar) - 마감 여부 체크
+  // 9. 중복 예약 감지 및 duplicate_group 시트 연결 (방문일이 오늘 이후인 경우만)
+  try {
+    DuplicateGroupService.linkDuplicateIfAny(reservationObj);
+  } catch (dupErr) {
+    console.warn(`[Batch] 중복 그룹 연결 실패 (${reservationObj.id}): ${dupErr.message}`);
+  }
+
+  // 10. 슬롯 동기화 (Source Calendar) - 마감 여부 체크
   const syncMsg = SlotService.syncSourceSlot(branchInfo.id, reservationDate);
   if (syncMsg) console.log(syncMsg);
 

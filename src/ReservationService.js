@@ -214,6 +214,15 @@ const ReservationService = {
         if (changes.deposit_status) this._syncDepositLabel(threadId, updatedRow[headers.indexOf('deposit_status')]);
       }
 
+      // 8. 중복 그룹 동기화 (예약 취소 시 duplicate_group 시트 정리)
+      if (changes.status && updatedRow[headers.indexOf('status')] === Config.RESERVATION_STATUS.CANCEL) {
+        try {
+          DuplicateGroupService.handleReservationCancelled(id);
+        } catch (dupErr) {
+          console.warn(`[ReservationService] 중복 그룹 취소 연동 실패: ${dupErr.message}`);
+        }
+      }
+
       return Util.createResponse(true);
 
     } catch (e) {

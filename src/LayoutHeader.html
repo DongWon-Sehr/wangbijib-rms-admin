@@ -90,7 +90,19 @@
                 <!-- Icon by Type -->
                 <div class="flex-shrink-0 mt-0.5">
                   <div
-                    v-if="noti.primaryType === 'pending'"
+                    v-if="noti.primaryType === 'duplicate'"
+                    class="w-8 h-8 rounded-full bg-purple-50 text-purple-700 flex items-center justify-center border border-purple-200"
+                  >
+                    <i class="ph ph-users-three text-lg"></i>
+                  </div>
+                  <div
+                    v-else-if="noti.primaryType === 'email_error'"
+                    class="w-8 h-8 rounded-full bg-red-50 text-red-600 flex items-center justify-center border border-red-200"
+                  >
+                    <i class="ph ph-warning-circle text-lg"></i>
+                  </div>
+                  <div
+                    v-else-if="noti.primaryType === 'pending'"
                     class="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100"
                   >
                     <i class="ph ph-clock text-lg"></i>
@@ -119,31 +131,62 @@
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-1.5 mb-1 flex-wrap">
                     <span
-                      v-if="noti.types.includes('imminent')"
+                      v-if="noti.types?.includes('duplicate')"
+                      class="noti-badge noti-badge-duplicate"
+                    >
+                      중복의심 {{ noti.subCount ? '(' + noti.subCount + '건)' : '' }}
+                    </span>
+                    <span
+                      v-if="noti.types?.includes('email_error')"
+                      class="noti-badge noti-badge-email-error"
+                    >
+                      이메일오류
+                    </span>
+                    <span
+                      v-if="noti.types?.includes('imminent')"
                       class="noti-badge noti-badge-imminent"
                     >
                       임박
                     </span>
                     <span
-                      v-if="noti.types.includes('pending')"
+                      v-if="noti.types?.includes('pending')"
                       class="noti-badge noti-badge-pending"
                     >
                       예약대기
                     </span>
                     <span
-                      v-if="noti.types.includes('deposit')"
+                      v-if="noti.types?.includes('deposit')"
                       class="noti-badge noti-badge-deposit"
                     >
                       예약금대기
                     </span>
                     <span
-                      v-if="noti.types.includes('refund')"
+                      v-if="noti.types?.includes('refund')"
                       class="noti-badge noti-badge-refund"
                     >
                       환불필요
                     </span>
                   </div>
-                  <p class="text-xs text-gray-600 font-medium truncate mb-0.5">{{ noti.desc }}</p>
+                  <p class="text-xs text-gray-800 font-semibold truncate mb-0.5">{{ noti.desc }}</p>
+                  
+                  <!-- 중복 그룹 서브 예약 미리보기 (최대 2건) -->
+                  <div v-if="noti.isDuplicateGroup && noti.reservations" class="mt-1 mb-1 space-y-0.5 bg-purple-50/50 p-1.5 rounded border border-purple-100 text-[11px] text-gray-600">
+                    <div v-for="(r, idx) in noti.reservations.slice(0, 2)" :key="r.id" class="truncate flex items-center gap-1">
+                      <span class="text-purple-700 font-bold">•</span>
+                      <span>{{ formatDate(r.reservation_date, 'datetime') }}</span>
+                      <span class="font-medium text-gray-700">[{{ getBranchName(r.branch_id) }}]</span>
+                      <span class="text-gray-400">({{ r.pax }}명)</span>
+                    </div>
+                    <div v-if="noti.reservations.length > 2" class="text-[10px] text-purple-700 font-bold pl-2">
+                      + 외 {{ noti.reservations.length - 2 }}건 더 있음
+                    </div>
+                  </div>
+
+                  <!-- 이메일 오류 상세 안내 -->
+                  <p v-if="noti.primaryType === 'email_error' && noti.errorMsg" class="text-[11px] text-red-600 font-medium mb-0.5">
+                    * {{ noti.errorMsg }}
+                  </p>
+
                   <p class="text-[10px] text-gray-400 flex items-center gap-1">
                     <i class="ph ph-calendar text-xs"></i> {{ noti.timeText }}
                   </p>
