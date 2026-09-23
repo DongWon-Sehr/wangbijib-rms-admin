@@ -314,9 +314,10 @@ const DuplicateGroupService = {
 
       const allData = sheet.getDataRange().getValues();
       const now = new Date();
+      const nowIso = now.toISOString();
 
       if (allData.length <= 1) {
-        return this.saveGroup({
+        const saveRes = this.saveGroup({
           group_id: groupId,
           id: groupId,
           reservation_ids: reservationIds,
@@ -324,6 +325,10 @@ const DuplicateGroupService = {
           status: Config.DUPLICATE_GROUP_STATUS.ACTIVE,
           mail_sent_at: now
         });
+        if (saveRes && saveRes.success) {
+          saveRes.data = { ...saveRes.data, mail_sent_at: nowIso };
+        }
+        return saveRes;
       }
 
       const headers = allData[0];
@@ -343,7 +348,7 @@ const DuplicateGroupService = {
       }
 
       if (matchedRows.length === 0) {
-        return this.saveGroup({
+        const saveRes = this.saveGroup({
           group_id: groupId,
           id: groupId,
           reservation_ids: reservationIds,
@@ -351,6 +356,10 @@ const DuplicateGroupService = {
           status: Config.DUPLICATE_GROUP_STATUS.ACTIVE,
           mail_sent_at: now
         });
+        if (saveRes && saveRes.success) {
+          saveRes.data = { ...saveRes.data, mail_sent_at: nowIso };
+        }
+        return saveRes;
       }
 
       matchedRows.forEach(rowNum => {
@@ -361,7 +370,7 @@ const DuplicateGroupService = {
       });
 
       console.log(`[DuplicateGroupService] 메일 발송 일시 기록 완료: ${groupId} (${matchedRows.length}행)`);
-      return Util.createResponse(true, { group_id: groupId, mail_sent_at: now }, '중복 안내 메일 발송 일시가 기록되었습니다.');
+      return Util.createResponse(true, { group_id: groupId, mail_sent_at: nowIso }, '중복 안내 메일 발송 일시가 기록되었습니다.');
     } catch (e) {
       console.log(`[DuplicateGroupService] markDuplicateMailSent Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);

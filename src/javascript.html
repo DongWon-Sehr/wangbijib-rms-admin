@@ -1631,6 +1631,7 @@
           if (res && res.success) {
             // [Optimistic UI] 응답 즉시 group.mail_sent_at을 로컬에 반영하여 딜레이 없이 즉시 갱신
             const sentAt = (res.data && res.data.mail_sent_at) || new Date().toISOString();
+            if (group) group.mail_sent_at = sentAt;
             const targetGroup = (duplicateGroupsData.value || []).find(g => (g.group_id === group.id || g.id === group.id));
             if (targetGroup) {
               targetGroup.mail_sent_at = sentAt;
@@ -1639,7 +1640,9 @@
                 id: group.id,
                 group_id: group.id,
                 mail_sent_at: sentAt,
-                status: 'active'
+                status: 'active',
+                group_type: group.group_type || 'auto',
+                reservation_ids: (group.reservations || []).map(r => r.id).join(',')
               });
             }
             duplicateGroupsData.value = [...duplicateGroupsData.value];

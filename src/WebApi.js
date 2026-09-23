@@ -493,7 +493,8 @@ function apiSendDuplicateConfirmationMail(params) {
     if (groupId) {
       const markRes = DuplicateGroupService.markDuplicateMailSent(groupId, reservationIds || []);
       if (markRes && markRes.data && markRes.data.mail_sent_at) {
-        mailSentAt = markRes.data.mail_sent_at;
+        const val = markRes.data.mail_sent_at;
+        mailSentAt = (val instanceof Date) ? val.toISOString() : String(val);
       }
     }
 
