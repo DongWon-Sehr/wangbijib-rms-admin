@@ -94,7 +94,14 @@
               (총 {{ activeReservationDuplicateGroup.reservations.length }}건 중복)
             </span>
             <span 
-              v-if="activeReservationDuplicateGroup.mail_sent_at" 
+              v-if="sendingDuplicateMailGroupId === activeReservationDuplicateGroup.id"
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800 border border-amber-200"
+            >
+              <i class="ph ph-spinner animate-spin text-amber-600"></i>
+              발송 처리 중...
+            </span>
+            <span 
+              v-else-if="activeReservationDuplicateGroup.mail_sent_at" 
               class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-green-100 text-green-800 border border-green-200"
             >
               <i class="ph ph-envelope-simple-check"></i>

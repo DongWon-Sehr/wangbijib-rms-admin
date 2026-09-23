@@ -489,11 +489,15 @@ function apiSendDuplicateConfirmationMail(params) {
       return mailRes;
     }
 
+    let mailSentAt = new Date().toISOString();
     if (groupId) {
-      DuplicateGroupService.markDuplicateMailSent(groupId, reservationIds || []);
+      const markRes = DuplicateGroupService.markDuplicateMailSent(groupId, reservationIds || []);
+      if (markRes && markRes.data && markRes.data.mail_sent_at) {
+        mailSentAt = markRes.data.mail_sent_at;
+      }
     }
 
-    return mailRes;
+    return Util.createResponse(true, { threadId: threadId, mail_sent_at: mailSentAt }, '중복 확인 메일이 발송되었습니다.');
   }, params);
 }
 

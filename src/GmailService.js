@@ -611,7 +611,7 @@ const GmailService = {
           </style>
         </head>
         <body>
-          <div style="max-width: 680px; width: 100%; margin: 0 auto; padding: 16px 0;">
+          <div style="max-width: 680px; width: 100%; margin: 0; padding: 12px 0;">
             <p>Dear ${customerName || 'Guest'},</p>
             <p>Thank you for choosing Wangbijib!</p>
             <p>We noticed multiple bookings under your name. To help us prepare your table, please let us know which reservation you would like to keep:</p>
@@ -621,12 +621,15 @@ const GmailService = {
             </div>
 
             <p>Please reply directly to this email with your preferred booking.</p>
-            <p style="margin-bottom: 24px;">We look forward to welcoming you! 🥩✨</p>
-
-            <p style="color: #718096; font-size: 13px; line-height: 1.4; margin: 0;">
-              Warm regards,<br>
-              <strong style="color: #2d3748;">Wangbijib Team</strong>
-            </p>
+            <p>We look forward to welcoming you! 🥩✨</p>
+            <p><br></p>
+            <p>Warm regards,</p>
+            <p>Wangbijib Support Team</p>
+            <p style="color:rgb(34,34,34)"><br></p>
+            <p style="color:rgb(34,34,34)"><br></p>
+          </div>
+          <div>
+            <table cellpadding="0" cellspacing="0" border="0" style="font-family:Arial,sans-serif;font-size:14px;color:rgb(51,51,51);line-height:1.6"><tbody><tr><td style="padding-right:10px"><img width="96" height="96" src="https://ci3.googleusercontent.com/mail-sig/AIorK4ysRrpHmmhrL7g42rhItAWfq1q1X2xbWpKLEyxe8JeffSu7JxmeRpps2E3ILgKAL0LKMpbzyWgPHibZ" style="color:rgb(32,33,36);font-family:Arial,Helvetica,sans-serif;font-size:small" class="CToWUd" data-bit="iit"></td><td style="vertical-align:top"><span style="font-size:16px"><b>왕비집</b></span>&nbsp;<b>Wangbijib</b><br>🍖사대문 갈비명가&nbsp;Premium Galbi Restaurant in Seoul<br>🏆No.1 K-BBQ Restaurant<br>🎀Nominated for 2024 Blue Ribbon Survey (K-Cuisine Prize)&nbsp;<br></td></tr><tr><td colspan="2" style="padding-top:10px"><b>🛒&nbsp;Online Store&nbsp;</b>&nbsp; &nbsp;<a href="https://www.wangbijib.com/" target="_blank" data-saferedirecturl="https://www.google.com/url?q=https://www.wangbijib.com/&amp;source=gmail&amp;ust=1766063890290000&amp;usg=AOvVaw1ERpt2TdeaZzRGNUC9vDM4"><font color="#000000">왕비몰</font></a>&nbsp;(Available in Korea only)<br><b>📆&nbsp;Reservation&nbsp;</b>&nbsp; &nbsp;&nbsp;<a href="https://www.wangbijib-restaurant.com/" target="_blank" data-saferedirecturl="https://www.google.com/url?q=https://www.wangbijib-restaurant.com/&amp;source=gmail&amp;ust=1766063890290000&amp;usg=AOvVaw3jqeQIr13f8WkXbla6SuGm"><font color="#000000">Wangbijib-restaurant</font></a>&nbsp;<br>📸&nbsp;<b>Instagram</b>&nbsp;<font size="1">&nbsp;</font>&nbsp; &nbsp; &nbsp;&nbsp;<a href="https://www.instagram.com/wangbijib_official" target="_blank" data-saferedirecturl="https://www.google.com/url?q=https://www.instagram.com/wangbijib_official&amp;source=gmail&amp;ust=1766063890290000&amp;usg=AOvVaw3raEafsbvmCGmA6g5ivYp5"><font color="#000000">@wangbijib_official</font></a><br><b>💌&nbsp;E-mail</b>&nbsp;<font size="1">&nbsp;</font>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp;<a href="mailto:wangbijib@gmail.com" style="color:rgb(51,51,51)" target="_blank">wangbijib@gmail.com</a><br>📞&nbsp;<b>Phone</b>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;+82) 070-4533-7028</td></tr></tbody></table>
           </div>
         </body>
         </html>

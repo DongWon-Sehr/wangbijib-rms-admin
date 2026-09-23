@@ -1559,6 +1559,7 @@
       const targetDuplicateMailGroup = ref(null);
       const selectedDuplicateTargetResId = ref('');
       const isSendingDuplicateMail = ref(false);
+      const sendingDuplicateMailGroupId = ref(null);
 
       const selectedDuplicateTargetReservation = computed(() => {
         if (!targetDuplicateMailGroup.value || !selectedDuplicateTargetResId.value) return null;
@@ -1609,6 +1610,7 @@
 
         try {
           isSendingDuplicateMail.value = true;
+          sendingDuplicateMailGroupId.value = group.id;
           const duplicateReservations = (group.reservations || []).map(r => ({
             branch_name: branchMapKo.value[r.branch_id] || getBranchName(r.branch_id),
             branch_name_en: branchMapEn.value[r.branch_id] || '',
@@ -1627,9 +1629,24 @@
 
           const res = await runGoogleScriptSilent('apiSendDuplicateConfirmationMail', payload);
           if (res && res.success) {
+            // [Optimistic UI] 응답 즉시 group.mail_sent_at을 로컬에 반영하여 딜레이 없이 즉시 갱신
+            const sentAt = (res.data && res.data.mail_sent_at) || new Date().toISOString();
+            const targetGroup = (duplicateGroupsData.value || []).find(g => (g.group_id === group.id || g.id === group.id));
+            if (targetGroup) {
+              targetGroup.mail_sent_at = sentAt;
+            } else {
+              duplicateGroupsData.value.push({
+                id: group.id,
+                group_id: group.id,
+                mail_sent_at: sentAt,
+                status: 'active'
+              });
+            }
+            duplicateGroupsData.value = [...duplicateGroupsData.value];
+
             showToast('중복확인 안내 메일이 발송되었습니다.');
             closeDuplicateMailModal();
-            await refreshInitialData(true);
+            refreshInitialData(true); // 백그라운드 동기화
           } else {
             showCustomAlert('발송 실패', (res && res.message) || '메일 발송 중 오류가 발생했습니다.');
           }
@@ -1637,6 +1654,7 @@
           showCustomAlert('오류', e.message);
         } finally {
           isSendingDuplicateMail.value = false;
+          sendingDuplicateMailGroupId.value = null;
         }
       };
 
@@ -2415,7 +2433,7 @@
         validateEmail, hasEmailError, getEmailErrorMsg, getEmailSuggestion, activeReservationEmailSuggestion, applyEmailSuggestion,
         handleCorrectEmailAndSendConfirmation,
         excludeSingleReservationFromGroup, clearDuplicateGroup, handleRemoveManualGroup, handleCreateManualDuplicateGroup,
-        targetDuplicateMailGroup, selectedDuplicateTargetResId, isSendingDuplicateMail,
+        targetDuplicateMailGroup, selectedDuplicateTargetResId, isSendingDuplicateMail, sendingDuplicateMailGroupId,
         selectedDuplicateTargetReservation, hasSelectableThreadInGroup,
         openDuplicateMailModal, closeDuplicateMailModal, submitDuplicateConfirmationMail,
         collapsedGroupMap, toggleGroupCollapse, areAllGroupsCollapsed, toggleAllGroupsCollapse,
