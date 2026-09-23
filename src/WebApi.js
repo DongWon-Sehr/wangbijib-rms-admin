@@ -312,10 +312,14 @@ function apiInitializeMailThread(payload) {
     // 1. 고객에게 직접 더미 메일(예약 확정 내역) 발송 및 스레드 생성
     const threadId = GmailService.createDummyElfsightThread(data);
     
-    // 2. 시트에 스레드 ID 저장
-    ReservationService.updateReservation(reservationId, { email_thread_id: threadId });
+    // 2. 시트에 스레드 ID 및 이메일 저장 (이메일이 모달에서 수정된 경우 동기화)
+    const updateFields = { email_thread_id: threadId };
+    if (data && data.email) {
+      updateFields.email = data.email;
+    }
+    ReservationService.updateReservation(reservationId, updateFields);
     
-    return { threadId: threadId };
+    return { threadId: threadId, email: data ? data.email : undefined };
   }, payload);
 }
 
@@ -355,7 +359,20 @@ function apiCorrectEmailAndInitializeThread(payload) {
  */
 function apiAddLabelsToThread(payload) {
   return _executeApi('apiAddLabelsToThread', () => {
-    GmailService.addLabelsAfterDelay(payload.threadId, payload.pax);
+    let { threadId, pax, status, deposit_status, reservationId } = payload;
+    if (reservationId && (!status || !deposit_status)) {
+      try {
+        const res = ReservationService.getReservationById(reservationId);
+        if (res) {
+          status = status || res.status;
+          deposit_status = deposit_status || res.deposit_status;
+          pax = pax !== undefined ? pax : res.pax;
+        }
+      } catch (e) {
+        console.warn(`[apiAddLabelsToThread] reservation fetch error: ${e.message}`);
+      }
+    }
+    GmailService.addLabelsAfterDelay(threadId, pax, status, deposit_status);
     return true;
   }, payload);
 }

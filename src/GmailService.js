@@ -449,13 +449,32 @@ const GmailService = {
 
   /**
    * [Async Helper] 메일 발송 직후 분리된 API 호출을 통해 지연 후 라벨 추가
+   * @param {string} threadId - Gmail 스레드 ID
+   * @param {number|string} pax - 인원수
+   * @param {string} [status='pending'] - 예약 상태 (confirm, cancel, pending)
+   * @param {string} [depositStatus=null] - 예약금 상태 (confirm, pending, refund, n/a)
    */
-  addLabelsAfterDelay(threadId, pax) {
+  addLabelsAfterDelay(threadId, pax, status, depositStatus) {
     // Gmail API가 스레드를 완전히 인덱싱할 시간을 확보 (1.5초 대기)
     Utilities.sleep(1500);
     try {
-      this.updateReservationLabel(threadId, this.RESERVATION_LABELS.PENDING);
-      if (parseInt(pax, 10) >= 9) {
+      // 1. 예약 상태 라벨 매핑 및 부여
+      let resLabel = this.RESERVATION_LABELS.PENDING;
+      if (status === 'confirm') {
+        resLabel = this.RESERVATION_LABELS.CONFIRM;
+      } else if (status === 'cancel') {
+        resLabel = this.RESERVATION_LABELS.CANCEL;
+      }
+      this.updateReservationLabel(threadId, resLabel);
+
+      // 2. 예약금 상태 라벨 매핑 및 부여
+      if (depositStatus === 'confirm') {
+        this.updateDepositLabel(threadId, this.DEPOSIT_LABELS.CONFIRM);
+      } else if (depositStatus === 'pending') {
+        this.updateDepositLabel(threadId, this.DEPOSIT_LABELS.PENDING);
+      } else if (depositStatus === 'refund') {
+        this.updateDepositLabel(threadId, this.DEPOSIT_LABELS.REFUND);
+      } else if (parseInt(pax, 10) >= 9 && (!depositStatus || depositStatus === 'n/a')) {
         this.updateDepositLabel(threadId, this.DEPOSIT_LABELS.PENDING);
       }
     } catch (e) {
@@ -575,13 +594,13 @@ const GmailService = {
         const paxStr = item.pax ? ` (${item.pax} Guests)` : '';
 
         return `
-          <div style="padding: 8px 12px; margin-bottom: 6px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; color: #1a202c;">
-            <strong>• Booking ${idx + 1}:</strong> [${branchStr}] ${dateStr}${paxStr}
+          <div style="padding: 10px 14px; margin-bottom: 8px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; color: #1a202c; line-height: 1.5;">
+            <strong style="color: #c16e36;">• Booking ${idx + 1}:</strong>&nbsp;<strong>[${branchStr}]</strong>&nbsp;${dateStr}&nbsp;<span style="color: #4a5568; font-weight: 600; white-space: nowrap;">${paxStr}</span>
           </div>
         `;
       }).join('');
 
-      const htmlBody = `
+      let htmlBody = `
         <!DOCTYPE html>
         <html>
         <head>
@@ -592,7 +611,7 @@ const GmailService = {
           </style>
         </head>
         <body>
-          <div style="max-width: 580px; margin: 0; padding: 12px 0;">
+          <div style="max-width: 680px; width: 100%; margin: 0 auto; padding: 16px 0;">
             <p>Dear ${customerName || 'Guest'},</p>
             <p>Thank you for choosing Wangbijib!</p>
             <p>We noticed multiple bookings under your name. To help us prepare your table, please let us know which reservation you would like to keep:</p>
@@ -612,6 +631,9 @@ const GmailService = {
         </body>
         </html>
       `;
+
+      // 4바이트 이모지(🥩 등) 인코딩 깨짐 원천 방지
+      htmlBody = this._encodeEmojisToEntities(htmlBody);
 
       const isDummyThread = targetMessage.getFrom().indexOf(this.SYSTEM_EMAIL_ADDRESS) !== -1;
       if (isDummyThread) {

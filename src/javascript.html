@@ -590,7 +590,10 @@
                 }
               }
               matchReasons = Array.from(reasonsSet);
-              if (matchReasons.length === 0) matchReasons = ['자동 감지'];
+              if (matchReasons.length === 0) {
+                // 더 이상 중복 사유가 없는 자동 감지 그룹은 Optimistic UI 상에서 제외
+                return;
+              }
             }
 
             finalGroups.push({
@@ -1332,9 +1335,18 @@
         activeReservation.value.internal_notes = payload.internal_notes;
         activeReservation.value.private_notes = payload.private_notes;
         if (target) {
+          const oldEmail = (listSnapshot && listSnapshot.email) || target.email;
           Object.assign(target, payload);
           target.reservation_date = newDateIso;
+          if (oldEmail && payload.email && oldEmail.trim().toLowerCase() !== payload.email.trim().toLowerCase()) {
+            if (bouncedEmailsData.value && bouncedEmailsData.value.length) {
+              bouncedEmailsData.value = bouncedEmailsData.value.filter(b => 
+                (b.recipientEmail || '').trim().toLowerCase() !== oldEmail.trim().toLowerCase()
+              );
+            }
+          }
         }
+        reservations.value = [...reservations.value];
         originalReservation.value = JSON.parse(JSON.stringify(activeReservation.value));
         showToast('저장되었습니다');
 
@@ -1654,6 +1666,8 @@
         if (await showCustomConfirm("신규 스레드 생성", "고객에게 예약 확정 내역을 발송하고 새로운 메일 스레드를 생성하시겠습니까?")) {
           try {
             isModalLoading.value = true;
+            const oldEmail = activeReservation.value.email;
+            const oldThreadId = activeReservation.value.email_thread_id;
             const branch = branches.value.find(b => b.id === activeReservation.value.branch_id) || {};
             const payload = {
               reservationId: activeReservation.value.id,
@@ -1667,15 +1681,38 @@
             const res = await runGoogleScriptSilent('apiInitializeMailThread', payload);
             if (res.success) { 
               activeReservation.value.email_thread_id = res.data.threadId;
+              if (originalReservation.value) {
+                originalReservation.value.email_thread_id = res.data.threadId;
+                if (activeReservation.value.email) {
+                  originalReservation.value.email = activeReservation.value.email;
+                }
+              }
               const targetIdx = reservations.value.findIndex(r => r.id === activeReservation.value.id);
               if (targetIdx > -1) {
                 reservations.value[targetIdx].email_thread_id = res.data.threadId;
+                if (activeReservation.value.email) {
+                  reservations.value[targetIdx].email = activeReservation.value.email;
+                }
               }
+
+              // [Optimistic UI] 이전 반송(bounce) 기록에서 즉시 제거
+              if (bouncedEmailsData.value && bouncedEmailsData.value.length) {
+                bouncedEmailsData.value = bouncedEmailsData.value.filter(b => 
+                  (oldThreadId ? b.threadId !== oldThreadId : true) &&
+                  (oldEmail ? (b.recipientEmail || '').trim().toLowerCase() !== oldEmail.trim().toLowerCase() : true)
+                );
+              }
+              // Vue 3 반응성 트리거 (이슈 필터 뱃지 카운트 즉각 갱신)
+              reservations.value = [...reservations.value];
+
               showCustomAlert("성공", "새 스레드가 생성되었으며 고객에게 메일이 발송되었습니다."); 
               // [Async] 서버 측에서 클라이언트 응답을 지연시키지 않기 위해 라벨 추가는 성공 응답 직후 별도 백그라운드 호출
               runGoogleScriptSilent('apiAddLabelsToThread', {
                 threadId: res.data.threadId,
-                pax: activeReservation.value.pax
+                pax: activeReservation.value.pax,
+                status: activeReservation.value.status,
+                deposit_status: activeReservation.value.deposit_status,
+                reservationId: activeReservation.value.id
               }).catch(e => console.warn("Background label addition failed:", e));
             } 
             else showCustomAlert("실패", res.message);
@@ -1707,6 +1744,8 @@
 
         try {
           isModalLoading.value = true;
+          const oldEmail = activeReservation.value.email;
+          const oldThreadId = activeReservation.value.email_thread_id;
           const branch = branches.value.find(b => b.id === activeReservation.value.branch_id) || {};
           const payload = {
             reservationId: activeReservation.value.id,
@@ -1735,12 +1774,25 @@
               reservations.value[targetIdx].email_thread_id = res.data.threadId;
             }
 
+            // [Optimistic UI] 이전 반송(bounce) 기록에서 즉시 제거하여 필터 뱃지 카운트 즉각 갱신
+            if (bouncedEmailsData.value && bouncedEmailsData.value.length) {
+              bouncedEmailsData.value = bouncedEmailsData.value.filter(b => 
+                (oldThreadId ? b.threadId !== oldThreadId : true) &&
+                (oldEmail ? (b.recipientEmail || '').trim().toLowerCase() !== oldEmail.trim().toLowerCase() : true)
+              );
+            }
+            // Vue 3 얕은 반응성 트리거 (computed 프로퍼티 즉각 재계산)
+            reservations.value = [...reservations.value];
+
             showCustomAlert("완료", "이메일 주소가 성공적으로 변경되었으며, 고객에게 예약 확인서 메일 발송 및 신규 스레드 생성이 완료되었습니다.");
 
-            // 백그라운드 라벨 추가
+            // 백그라운드 라벨 추가 (예약 상태 및 예약금 상태 싱크)
             runGoogleScriptSilent('apiAddLabelsToThread', {
               threadId: res.data.threadId,
-              pax: activeReservation.value.pax
+              pax: activeReservation.value.pax,
+              status: activeReservation.value.status,
+              deposit_status: activeReservation.value.deposit_status,
+              reservationId: activeReservation.value.id
             }).catch(e => console.warn("Background label addition failed:", e));
 
             await refreshInitialData(true);
