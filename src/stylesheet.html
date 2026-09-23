@@ -36,6 +36,15 @@
     overscroll-behavior-x: none;
   }
 
+  /* iOS Safari 모바일 폼 포커스 시 자동 확대(줌인) 방지: 타이핑하는 모달(.fixed.z-50) 내부 입력창에만 16px 적용 */
+  @media screen and (max-width: 768px) {
+    .fixed.z-50 input:not([type="checkbox"]):not([type="radio"]),
+    .fixed.z-50 select,
+    .fixed.z-50 textarea {
+      font-size: 16px !important;
+    }
+  }
+
   /* --- Transitions --- */
   .modal-enter-active, .modal-leave-active {
     transition: opacity 0.2s ease;
@@ -176,7 +185,7 @@
 
   /* [NEW] Notification Styles */
   .notification-scroll-container {
-    max-height: 380px;
+    max-height: min(380px, calc(100vh - 140px));
     overflow-y: auto;
   }
   .noti-item {
@@ -211,5 +220,15 @@
     background-color: #dbeafe; /* blue-100 */
     color: #1e40af; /* blue-800 */
     border: 1px solid #bfdbfe; /* blue-200 */
+  }
+  .noti-badge-duplicate {
+    background-color: #f3e8ff; /* purple-100 */
+    color: #6b21a8; /* purple-800 */
+    border: 1px solid #e9d5ff; /* purple-200 */
+  }
+  .noti-badge-email-error {
+    background-color: #fee2e2; /* red-100 */
+    color: #991b1b; /* red-800 */
+    border: 1px solid #fecaca; /* red-200 */
   }
 </style>

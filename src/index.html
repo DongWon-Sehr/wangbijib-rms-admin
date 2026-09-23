@@ -4,7 +4,7 @@
 <head>
   <base target="_top">
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>왕비집 예약관리 시스템 v2.0</title>
 
   <!-- 1. Libraries -->
@@ -84,7 +84,7 @@
       <main class="flex-1 overflow-y-auto relative bg-gray-100 p-2 md:p-4">
 
         <!-- View: Reservation List -->
-        <div v-show="currentView === 'list'" class="h-full flex flex-col">
+        <div v-show="currentView === 'list'" class="min-h-full md:h-full flex flex-col">
           <?!= include('ViewList'); ?>
         </div>
 
@@ -122,6 +122,14 @@
         <div v-if="modalState.mail"
           class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
           <?!= include('ModalMailTemplate'); ?>
+        </div>
+      </transition>
+
+      <!-- 중복확인 메일 스레드 선택 모달 -->
+      <transition name="modal">
+        <div v-if="modalState.duplicateMail"
+          class="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <?!= include('ModalDuplicateMailSelect'); ?>
         </div>
       </transition>
 

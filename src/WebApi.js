@@ -13,7 +13,7 @@ function doGet(e) {
 
     return template.evaluate()
       .setTitle('왕비집 예약관리 시스템 v' + Config.APP_VERSION)
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=no')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   } catch (err) {
     return HtmlService.createHtmlOutput(`<h3>System Error</h3><p>${err.message}</p>`);
@@ -161,7 +161,8 @@ function apiLoadInitialData() {
       slotMasters: Util.getSheetDataAsObjects(Config.SHEET_NAMES.SLOT_MASTER),
       slotDefaults: Util.getSheetDataAsObjects(Config.SHEET_NAMES.SLOT_DEFAULT),
       slotOverrides: Util.getSheetDataAsObjects(Config.SHEET_NAMES.SLOT_OVERRIDE),
-      mailTemplates: MailTemplateService.getAllTemplates()
+      mailTemplates: MailTemplateService.getAllTemplates(),
+      duplicateGroups: DuplicateGroupService.getAllGroups()
     };
   });
 }
@@ -311,10 +312,45 @@ function apiInitializeMailThread(payload) {
     // 1. 고객에게 직접 더미 메일(예약 확정 내역) 발송 및 스레드 생성
     const threadId = GmailService.createDummyElfsightThread(data);
     
-    // 2. 시트에 스레드 ID 저장
-    ReservationService.updateReservation(reservationId, { email_thread_id: threadId });
+    // 2. 시트에 스레드 ID 및 이메일 저장 (이메일이 모달에서 수정된 경우 동기화)
+    const updateFields = { email_thread_id: threadId };
+    if (data && data.email) {
+      updateFields.email = data.email;
+    }
+    ReservationService.updateReservation(reservationId, updateFields);
     
-    return { threadId: threadId };
+    return { threadId: threadId, email: data ? data.email : undefined };
+  }, payload);
+}
+
+/**
+ * [NEW] 이메일 주소 선변경 + 신규 스레드 예약확인 메일 발송 (순서 보장 단일 트랜잭션)
+ */
+function apiCorrectEmailAndInitializeThread(payload) {
+  return _executeApi('apiCorrectEmailAndInitializeThread', () => {
+    const { reservationId, newEmail, data } = payload;
+    if (!reservationId || !newEmail) throw new Error('예약 ID 또는 새로운 이메일 주소가 누락되었습니다.');
+
+    // [STEP 1] 시트 DB의 이메일 주소를 먼저 수정하여 저장
+    const updateRes = ReservationService.updateReservation(reservationId, { email: newEmail });
+    if (!updateRes.success) {
+      throw new Error('이메일 주소 저장 실패: ' + updateRes.message);
+    }
+    console.log(`[EmailCorrection] 예약(${reservationId}) 이메일 주소 선변경 완료: ${newEmail}`);
+
+    // [STEP 2] 변경된 새 주소로 예약 확인서 메일 발송 및 스레드 생성
+    const sendData = {
+      ...data,
+      email: newEmail,
+      isCorrectedResend: true
+    };
+    const threadId = GmailService.createDummyElfsightThread(sendData);
+    console.log(`[EmailCorrection] 예약확인 메일 발송 완료: threadId=${threadId}`);
+
+    // [STEP 3] 발송된 신규 threadId를 시트 DB에 저장
+    ReservationService.updateReservation(reservationId, { email_thread_id: threadId });
+
+    return { threadId: threadId, email: newEmail };
   }, payload);
 }
 
@@ -323,7 +359,20 @@ function apiInitializeMailThread(payload) {
  */
 function apiAddLabelsToThread(payload) {
   return _executeApi('apiAddLabelsToThread', () => {
-    GmailService.addLabelsAfterDelay(payload.threadId, payload.pax);
+    let { threadId, pax, status, deposit_status, reservationId } = payload;
+    if (reservationId && (!status || !deposit_status)) {
+      try {
+        const res = ReservationService.getReservationById(reservationId);
+        if (res) {
+          status = status || res.status;
+          deposit_status = deposit_status || res.deposit_status;
+          pax = pax !== undefined ? pax : res.pax;
+        }
+      } catch (e) {
+        console.warn(`[apiAddLabelsToThread] reservation fetch error: ${e.message}`);
+      }
+    }
+    GmailService.addLabelsAfterDelay(threadId, pax, status, deposit_status);
     return true;
   }, payload);
 }
@@ -381,4 +430,106 @@ function apiDeleteSystemData(type, id) {
         return Util.createResponse(false, null, "Unsupported delete type");
     }
   }, { type, id });
+}
+
+// ==========================================
+// 6. Duplicate Group & Migration API Endpoints
+// ==========================================
+
+function apiGetDuplicateGroups() {
+  return _executeApi('apiGetDuplicateGroups', () => {
+    UserService.checkSession();
+    return DuplicateGroupService.getAllGroups();
+  });
+}
+
+function apiCreateManualDuplicateGroup(params) {
+  return _executeApi('apiCreateManualDuplicateGroup', () => {
+    UserService.checkSession();
+    return DuplicateGroupService.createManualGroup(params.reservationIds, params.earliestDate);
+  }, params);
+}
+
+function apiClearDuplicateGroup(params) {
+  return _executeApi('apiClearDuplicateGroup', () => {
+    UserService.checkSession();
+    return DuplicateGroupService.clearGroup(params.groupId, params.reservationIds, params.earliestDate);
+  }, params);
+}
+
+function apiRemoveManualDuplicateGroup(params) {
+  return _executeApi('apiRemoveManualDuplicateGroup', () => {
+    UserService.checkSession();
+    return DuplicateGroupService.removeManualGroup(params.groupId);
+  }, params);
+}
+
+function apiExcludeReservationFromGroup(params) {
+  return _executeApi('apiExcludeReservationFromGroup', () => {
+    UserService.checkSession();
+    return DuplicateGroupService.excludeReservationFromGroup(params.groupId, params.reservationId);
+  }, params);
+}
+
+function apiMarkDuplicateMailSent(params) {
+  return _executeApi('apiMarkDuplicateMailSent', () => {
+    UserService.checkSession();
+    return DuplicateGroupService.markDuplicateMailSent(params.groupId, params.reservationIds);
+  }, params);
+}
+
+function apiSendDuplicateConfirmationMail(params) {
+  return _executeApi('apiSendDuplicateConfirmationMail', () => {
+    UserService.checkSession();
+    const { groupId, threadId, customerName, duplicateReservations, reservationIds } = params;
+    if (!threadId) {
+      throw new Error('이메일 스레드 ID가 없어 발송할 수 없습니다.');
+    }
+
+    const mailRes = GmailService.sendDuplicateConfirmationMail({
+      threadId: threadId,
+      customerName: customerName,
+      duplicateReservations: duplicateReservations || []
+    });
+
+    if (!mailRes.success) {
+      return mailRes;
+    }
+
+    let mailSentAt = new Date().toISOString();
+    if (groupId) {
+      const markRes = DuplicateGroupService.markDuplicateMailSent(groupId, reservationIds || []);
+      if (markRes && markRes.data && markRes.data.mail_sent_at) {
+        const val = markRes.data.mail_sent_at;
+        mailSentAt = (val instanceof Date) ? val.toISOString() : String(val);
+      }
+    }
+
+    return Util.createResponse(true, { threadId: threadId, mail_sent_at: mailSentAt }, '중복 확인 메일이 발송되었습니다.');
+  }, params);
+}
+
+function apiRunSchemaMigration() {
+  return _executeApi('apiRunSchemaMigration', () => {
+    const session = UserService.checkSession();
+    if (!session.success) throw new Error(session.message);
+    if (session.data.role !== Config.USER_ROLES.ADMIN) throw new Error('관리자 권한이 필요합니다.');
+    return MigrationService.setup();
+  });
+}
+
+function apiBackfillDuplicateGroups() {
+  return _executeApi('apiBackfillDuplicateGroups', () => {
+    const session = UserService.checkSession();
+    if (!session.success) throw new Error(session.message);
+    if (session.data.role !== Config.USER_ROLES.ADMIN) throw new Error('관리자 권한이 필요합니다.');
+    return MigrationService.backfillFutureDuplicateGroups();
+  });
+}
+
+function apiGetBouncedEmails() {
+  return _executeApi('apiGetBouncedEmails', () => {
+    UserService.checkSession();
+    return GmailService.getBouncedEmailDetails();
+  });
 }

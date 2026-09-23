@@ -118,99 +118,7 @@ function testApiSendTestMail() {
   console.log('발송 결과:', result);
 }
 
-/**
- * [Migration] DB 스키마(시트) 초기화 및 생성 스크립트
- * - 실행 방법: 에디터 상단 함수 선택에서 'runSchemaMigration' 선택 후 실행
- */
-function runSchemaMigration() {
-  const ss = SpreadsheetApp.openById(Config.SPREADSHEET_ID);
-  
-  // v1.4 전체 테이블 스키마 정의
-  const schemas = [
-    {
-      name: Config.SHEET_NAMES.USER,
-      headers: ['id', 'user_email', 'user_name', 'role', 'enabled', 'created_at', 'updated_at'],
-      note: '사용자 정보 (이메일 인증 기반)'
-    },
-    {
-      name: Config.SHEET_NAMES.RESERVATION,
-      headers: [
-        'id', 'response_id', 'booking_request_date', 'branch_id', 'reservation_date', 
-        'customer_name', 'number_of_people', 'notes', 'email_address', 'email_thread_id', 
-        'calendar_id', 'event_id', 'enabled', 'is_read', 'message_sent_at', 
-        'internal_notes', 'deposit_status', 'deposit_amount', 'deposit_paid_at', 'deposit_refund_at',
-        'created_at', 'updated_at'
-      ],
-      note: '예약 통합 데이터 (v1.4 컬럼 추가됨)'
-    },
-    {
-      name: Config.SHEET_NAMES.BRANCH,
-      headers: ['id', 'branch_name_en', 'branch_name_ko', 'location', 'enabled', 'calendar_id', 'created_at', 'updated_at'],
-      note: '지점 마스터'
-    },
-    {
-      name: Config.SHEET_NAMES.USER_PERMISSION,
-      headers: ['id', 'user_id', 'branch_id', 'enabled', 'created_at', 'updated_at'],
-      note: '사용자-지점 권한 매핑'
-    },
-    {
-      name: Config.SHEET_NAMES.SLOT_MASTER,
-      headers: ['id', 'time', 'slot', 'enabled', 'created_at', 'updated_at'],
-      note: '시간대 마스터 (예: 11:00, 11:30...)'
-    },
-    {
-      name: Config.SHEET_NAMES.SLOT_DEFAULT,
-      headers: ['id', 'branch_id', 'slot_master_id', 'slot', 'enabled', 'created_at', 'updated_at'],
-      note: '지점별 기본 슬롯 설정'
-    },
-    {
-      name: Config.SHEET_NAMES.SLOT_OVERRIDE,
-      headers: ['id', 'branch_id', 'slot_master_id', 'date', 'slot', 'reason', 'enabled', 'created_at', 'updated_at'],
-      note: '날짜별 슬롯 커스텀 설정'
-    },
-    {
-      name: Config.SHEET_NAMES.MAIL_TEMPLATE,
-      headers: ['id', 'template_name', 'subject', 'body_html', 'updated_at'],
-      note: '메일 템플릿 관리'
-    }
-  ];
 
-  console.log('🚀 [Migration] 스키마 마이그레이션 시작...');
-
-  schemas.forEach(schema => {
-    let sheet = ss.getSheetByName(schema.name);
-    
-    if (!sheet) {
-      // 1. 시트가 없으면 생성
-      sheet = ss.insertSheet(schema.name);
-      console.log(`✅ [Create] 시트 생성됨: ${schema.name}`);
-      
-      // 2. 헤더 추가
-      sheet.appendRow(schema.headers);
-      
-      // 3. 헤더 스타일링 (고정, 굵게, 회색 배경)
-      const headerRange = sheet.getRange(1, 1, 1, schema.headers.length);
-      headerRange.setFontWeight('bold');
-      headerRange.setBackground('#f3f3f3');
-      sheet.setFrozenRows(1);
-      
-      // 4. (선택) ID 컬럼 숨김 처리 등은 필요 시 추가
-      // if (schema.headers[0] === 'id') sheet.hideColumns(1);
-
-    } else {
-      // 시트가 이미 존재할 경우 (헤더 비교 등 고도화 가능하지만 일단 스킵)
-      console.log(`ℹ️ [Skip] 이미 존재하는 시트: ${schema.name}`);
-      
-      // (옵션) 헤더가 비어있으면 채워넣기
-      if (sheet.getLastRow() === 0) {
-        sheet.appendRow(schema.headers);
-        console.log(`   └─ 헤더가 비어있어 추가했습니다.`);
-      }
-    }
-  });
-
-  console.log('✨ [Migration] 마이그레이션 완료.');
-}
 
 /**
  * [Test] 초기 Admin 유저 강제 생성 (테스트용)
@@ -328,44 +236,7 @@ function runEnabledColumnMigration() {
 
   console.log(`✅ [Migration] enabled 컬럼(열: ${enabledColIdx})을 문자열 드롭다운으로 변환 완료했습니다.`);
 }
-function runMailTemplateMigration() {
-  const ss = SpreadsheetApp.openById(Config.SPREADSHEET_ID);
-  
-  const schema = {
-    name: Config.SHEET_NAMES.MAIL_TEMPLATE,
-    headers: ['id', 'template_name', 'subject', 'body_html', 'updated_at'],
-    note: '메일 템플릿 관리'
-  };
 
-  console.log(`🚀 [Migration] ${schema.name} 시트 단독 마이그레이션 시작...`);
-
-  let sheet = ss.getSheetByName(schema.name);
-  
-  if (!sheet) {
-    // 1. 시트가 없으면 생성
-    sheet = ss.insertSheet(schema.name);
-    console.log(`✅ [Create] 시트 생성됨: ${schema.name}`);
-    
-    // 2. 헤더 추가
-    sheet.appendRow(schema.headers);
-    
-    // 3. 헤더 스타일링
-    const headerRange = sheet.getRange(1, 1, 1, schema.headers.length);
-    headerRange.setFontWeight('bold');
-    headerRange.setBackground('#f3f3f3');
-    sheet.setFrozenRows(1);
-  } else {
-    console.log(`ℹ️ [Skip] 이미 존재하는 시트: ${schema.name}`);
-    
-    // (옵션) 헤더가 비어있으면 채워넣기
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow(schema.headers);
-      console.log(`   └─ 헤더가 비어있어 추가했습니다.`);
-    }
-  }
-
-  console.log('✨ [Migration] 메일 템플릿 처리 완료.');
-}
 
 /**
  * [Test] 초기 Admin 유저 강제 생성 (테스트용)

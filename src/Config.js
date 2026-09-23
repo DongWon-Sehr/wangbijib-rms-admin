@@ -3,7 +3,7 @@
  */
 const Config = {
   // 0. App Version (배포 시 여기를 직접 올림 — UI/탭 타이틀에 자동 반영)
-  APP_VERSION: '2.0.82',
+  APP_VERSION: '2.1.4',
 
   // 0-1. BI 로고 (스크립트 소유 계정 Drive 파일)
   LOGO_FILE_ID: '1Ni3HhXrloRWe_idt2XeroEvcS--n6BK9',
@@ -21,7 +21,8 @@ const Config = {
     SLOT_MASTER: 'slot_master',     // 시간대 마스터
     SLOT_DEFAULT: 'slot_default',   // 지점별 기본 슬롯 설정
     SLOT_OVERRIDE: 'slot_override',  // 날짜별 슬롯 재정의 (커스텀 슬롯)
-    MAIL_TEMPLATE: 'mail_template',  // 날짜별 슬롯 재정의 (커스텀 슬롯)
+    MAIL_TEMPLATE: 'mail_template',  // 메일 템플릿 관리
+    DUPLICATE_GROUP: 'duplicate_group', // 중복 예약 그룹 관리 시트
   },
 
   // 3. Deposit Policy
@@ -55,6 +56,48 @@ const Config = {
     PENDING: 'pending', // 입금 대기 (9인 이상 초기 상태)
     CONFIRM: 'confirm', // 입금 확인
     REFUND: 'refund'    // 환불
+  },
+
+  DUPLICATE_GROUP_STATUS: {
+    ACTIVE: 'active',   // 중복 의심 상태
+    CLEARED: 'cleared'  // 중복 아님 처리 완료
+  },
+
+  DUPLICATE_GROUP_TYPE: {
+    AUTO: 'auto',       // 자동 감지 그룹
+    MANUAL: 'manual'    // 수동 묶음 그룹
+  },
+
+  // 4-1. 대표적 이메일 도메인 오타 사전 매핑
+  EMAIL_TYPO_MAP: {
+    'gmial.com': 'gmail.com',
+    'gmai.com': 'gmail.com',
+    'gamil.com': 'gmail.com',
+    'gmaill.com': 'gmail.com',
+    'gmaik.com': 'gmail.com',
+    'gimal.com': 'gmail.com',
+    'gmail.con': 'gmail.com',
+    'naver.con': 'naver.com',
+    'nver.com': 'naver.com',
+    'nave.com': 'naver.com',
+    'navar.com': 'naver.com',
+    'naver.cm': 'naver.com',
+    'hanmial.net': 'hanmail.net',
+    'hanmail.com': 'hanmail.net',
+    'hanmail.con': 'hanmail.net',
+    'daun.net': 'daum.net',
+    'daum.com': 'daum.net',
+    'daum.con': 'daum.net',
+    'hotmial.com': 'hotmail.com',
+    'hotmai.com': 'hotmail.com',
+    'hotmaill.com': 'hotmail.com',
+    'homail.com': 'hotmail.com',
+    'icould.com': 'icloud.com',
+    'iclod.com': 'icloud.com',
+    'iclud.com': 'icloud.com',
+    'outlok.com': 'outlook.com',
+    'yahoo.con': 'yahoo.com',
+    'yaho.com': 'yahoo.com'
   },
 
   // 5. Roles
