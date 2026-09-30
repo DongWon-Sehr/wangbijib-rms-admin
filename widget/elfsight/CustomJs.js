@@ -5,6 +5,7 @@
    3. Branch Disabler (Main Store)
    4. Auto-expand About Section
    5. Rule-based Time Slot Management (Break Time & Opening Hours)
+   6. Mobile Branch Description HTML Rendering
    ========================================================================== */
 
 const STORE_CONFIGS = {
@@ -381,6 +382,42 @@ const autoExpandAbout = () => {
 };
 
 /* =========================
+   [기능 6] 모바일 지점 설명의 줄바꿈 및 강조 복구
+   ========================= */
+const renderMobileDescriptionHtml = () => {
+  document.querySelectorAll('.es-service-selector-container .es-text-shortener-content')
+    .forEach(description => {
+      const source = description.textContent;
+      if (!/<(?:br\s*\/?>|\/?i>|\/?b>)/i.test(source)) return;
+
+      const fragment = document.createDocumentFragment();
+      const stack = [fragment];
+      const parts = source.split(/(<br\s*\/?>|<\/?(?:i|b)>)/gi);
+
+      for (const part of parts) {
+        if (/^<br\s*\/?>$/i.test(part)) {
+          stack.at(-1).appendChild(document.createElement('br'));
+        } else if (/^<(i|b)>$/i.test(part)) {
+          const element = document.createElement(part.slice(1, -1).toLowerCase());
+          stack.at(-1).appendChild(element);
+          stack.push(element);
+        } else if (/^<\/(i|b)>$/i.test(part)) {
+          const name = part.slice(2, -1).toLowerCase();
+          if (stack.length > 1 && stack.at(-1).tagName.toLowerCase() === name) {
+            stack.pop();
+          } else {
+            stack.at(-1).appendChild(document.createTextNode(part));
+          }
+        } else if (part) {
+          stack.at(-1).appendChild(document.createTextNode(part));
+        }
+      }
+
+      description.replaceChildren(fragment);
+    });
+};
+
+/* =========================
    [기능 2] 9인 이상 보증금 안내 모달
    ========================= */
 (function() {
@@ -458,6 +495,7 @@ const observer = new MutationObserver(() => {
   setupBranchDisabler();
   autoExpandAbout();
   setupTimeSlotDisabler();
+  renderMobileDescriptionHtml();
 });
 
 observer.observe(document.body, { childList: true, subtree: true });
@@ -467,5 +505,6 @@ setupValidation();
 setupBranchDisabler();
 autoExpandAbout();
 setupTimeSlotDisabler();
+renderMobileDescriptionHtml();
 
-console.log("[WANGBIJIB SCRIPT] All systems loaded (Rule-based + Restored UX)");
+console.log("[WANGBIJIB SCRIPT] All systems loaded (Rule-based + Restored UX + Mobile HTML)");
