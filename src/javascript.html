@@ -344,6 +344,31 @@
         });
       };
 
+      const retryableReadApis = new Set([
+        'apiCheckSession', 'apiGetBranches', 'apiGetReservations', 'apiGetSlotMasters',
+        'apiGetSlotDefaults', 'apiGetSlotOverrides', 'apiGetMailTemplates',
+        'apiGetDuplicateGroups', 'apiGetBouncedEmails', 'apiGetUsers'
+      ]);
+      const runReadGoogleScript = async (funcName) => {
+        if (!retryableReadApis.has(funcName)) throw new Error('조회 API가 아닙니다: ' + funcName);
+        // 인증 단계는 기존 로딩 종료 처리도 유지한다.
+        const invoke = funcName === 'apiCheckSession' ? runGoogleScript : runGoogleScriptSilent;
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            return await invoke(funcName);
+          } catch (err) {
+            const message = String(err && err.message || err);
+            const isStorageInternalError = message.includes('server error occurred while reading from storage')
+              && message.includes('Error code INTERNAL');
+            if (!isStorageInternalError || attempt === 2) throw err;
+
+            console.warn(`[${funcName}] 저장소 INTERNAL 오류, 재시도 ${attempt + 1}/2`, err);
+            await new Promise(resolve => setTimeout(resolve, 400 * Math.pow(2, attempt)));
+          }
+        }
+      };
+
       const showCustomAlert = (title, message) => new Promise(r => { 
         alertModal.title=title; alertModal.message=message; alertModal.isConfirm=false; alertModal.resolve=r; alertModal.isOpen=true; 
       });
@@ -1233,11 +1258,11 @@
         try {
           if (!silent) { isLoading.value = true; loadingMessage.value = '데이터 갱신 중...'; }
           const promises = [
-            runGoogleScriptSilent('apiGetBranches'), runGoogleScriptSilent('apiGetReservations'), runGoogleScriptSilent('apiGetSlotMasters'),
-            runGoogleScriptSilent('apiGetSlotDefaults'), runGoogleScriptSilent('apiGetSlotOverrides'), runGoogleScriptSilent('apiGetMailTemplates'),
-            runGoogleScriptSilent('apiGetDuplicateGroups'), runGoogleScriptSilent('apiGetBouncedEmails')
+            runReadGoogleScript('apiGetBranches'), runReadGoogleScript('apiGetReservations'), runReadGoogleScript('apiGetSlotMasters'),
+            runReadGoogleScript('apiGetSlotDefaults'), runReadGoogleScript('apiGetSlotOverrides'), runReadGoogleScript('apiGetMailTemplates'),
+            runReadGoogleScript('apiGetDuplicateGroups'), runReadGoogleScript('apiGetBouncedEmails')
           ];
-          if (currentUser.value && currentUser.value.role === 'admin') promises.push(runGoogleScriptSilent('apiGetUsers'));
+          if (currentUser.value && currentUser.value.role === 'admin') promises.push(runReadGoogleScript('apiGetUsers'));
           const results = await Promise.all(promises);
           branches.value = results[0].data || []; reservations.value = results[1].data || []; slotMasters.value = results[2].data || [];
           slotDefaults.value = results[3].data || []; slotOverrides.value = results[4].data || []; mailTemplates.value = results[5].data || [];
@@ -2308,7 +2333,7 @@
       const initApp = async () => {
         try {
           loadingMessage.value = '유저 정보 확인 중...';
-          const auth = await runGoogleScript('apiCheckSession');
+          const auth = await runReadGoogleScript('apiCheckSession');
           if (!auth.success) { appState.value = 'denied'; deniedMessage.value = auth.message; return; }
           currentUser.value = auth.data;
           if (currentUser.value.role === 'viewer') currentView.value = 'list';
@@ -2410,7 +2435,7 @@
               syncCountdown.value = 60;
               try {
                 const syncStartedAt = Date.now();
-                const res = await runGoogleScriptSilent('apiGetReservations');
+                const res = await runReadGoogleScript('apiGetReservations');
                 // [Race Guard] 응답 대기 중 뮤테이션이 발생했다면 이 응답은 취소/저장 이전의 구버전 데이터일 수 있으므로 폐기
                 if (isMutating.value || lastMutationCompletedAt > syncStartedAt) {
                   console.warn('[Sync] 뮤테이션과 경합 감지 → 이번 동기화 응답 폐기');
