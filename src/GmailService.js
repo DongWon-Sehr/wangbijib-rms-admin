@@ -303,7 +303,6 @@ const GmailService = {
       const { branchName, customerName, email, pax, phoneNumber, startDate, notes, bookingRequestDate } = data;
 
       const formattedDateForSubject = this._formatDateForGmailSubjectQuery(startDate);
-      const formattedDateForBody = this._formatDateForGmailBodyQuery(startDate);
 
       const searchStart = new Date(bookingRequestDate.getTime() - 2 * 24 * 60 * 60 * 1000);
       const searchEnd = new Date(bookingRequestDate.getTime() + 2 * 24 * 60 * 60 * 1000);
@@ -322,14 +321,13 @@ const GmailService = {
         `": ${pax}"`,
       ];
 
-      if (notes && notes.trim() !== "") {
-        queryParts.push(`"Notes: ${notes.trim()}"`);
-      }
-
       const query = queryParts.join(' ');
       console.log(`[Gmail] Searching Thread: ${query}`);
 
       const threads = GmailApp.search(query);
+      console.log(`[Gmail] Search returned ${threads.length} thread(s).`);
+      if (threads.length === 0) return null;
+
       const SEARCH_WINDOW_MINUTES = 5;
 
       const filteredThreads = threads.filter(thread => {
@@ -340,11 +338,30 @@ const GmailService = {
         });
       });
 
-      if (filteredThreads.length > 0) {
-        return filteredThreads[0].getId();
-      }
-      return null;
+      console.log(`[Gmail] ${filteredThreads.length} thread(s) matched the request time window.`);
+      if (filteredThreads.length === 0) return null;
+      if (filteredThreads.length === 1) return filteredThreads[0].getId();
 
+      const normalizedNotes = String(notes || '').replace(/\s+/g, ' ').trim();
+      if (!normalizedNotes) {
+        console.log('[Gmail] Multiple threads matched, but notes are empty.');
+        return null;
+      }
+
+      const matchingThreads = filteredThreads.filter(thread =>
+        thread.getMessages().some(msg => {
+          const receivedTime = msg.getDate().getTime();
+          if (receivedTime < bookingRequestDate.getTime() - SEARCH_WINDOW_MINUTES * 60 * 1000 ||
+              receivedTime > bookingRequestDate.getTime() + SEARCH_WINDOW_MINUTES * 60 * 1000) return false;
+          return (msg.getPlainBody() || '').replace(/\s+/g, ' ').includes(normalizedNotes);
+        })
+      );
+      console.log(`[Gmail] ${matchingThreads.length} thread(s) matched notes.`);
+      if (matchingThreads.length > 0) {
+        return matchingThreads[0].getId();
+      } else {
+        return null;
+      }
     } catch (e) {
       console.log(`[Gmail] Find Thread Error: ${e.message}`);
       return null;
