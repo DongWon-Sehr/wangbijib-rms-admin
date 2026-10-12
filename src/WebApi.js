@@ -56,26 +56,12 @@ function doPost(e) {
   }
 }
 
-function apiLoginWithGoogle(idToken) {
-  const payload = Util.verifyGoogleIdToken(idToken);
+function apiLogin(email) {
+  return _executeApi('apiLogin', () => UserService.login(email));
+}
 
-  if (!payload || !payload.email) {
-    return Util.createResponse(false, null, '로그인 실패');
-  }
-
-  // ✔ 여기서 이메일로 사용자 조회
-  const user = getUserByEmail(payload.email);
-  if (!user) {
-    return Util.createResponse(false, null, '접근 권한 없음');
-  }
-
-  // ✔ 세션 저장
-  PropertiesService.getUserProperties().setProperty(
-    'LOGIN_EMAIL',
-    payload.email
-  );
-
-  return Util.createResponse(true, user);
+function apiLogout() {
+  return _executeApi('apiLogout', () => UserService.logout());
 }
 
 function include(filename) {
@@ -142,8 +128,8 @@ function _executeApi(apiName, action, params = null) {
 // 4. API Endpoints (Granular Data Fetching)
 // ==========================================
 
-function apiCheckSession() {
-  return _executeApi('apiCheckSession', () => UserService.checkSession());
+function apiCheckSession(clientEmail) {
+  return _executeApi('apiCheckSession', () => UserService.checkSession(clientEmail));
 }
 
 // [Legacy] 기존 통합 로딩 함수

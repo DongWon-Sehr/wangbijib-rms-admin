@@ -279,11 +279,11 @@
 
             <!-- Actions -->
             <div class="p-2">
-              <a :href="logoutUrl"
-                class="flex items-center w-full px-4 py-3 text-sm font-medium text-red-600 rounded-lg hover:bg-red-50 transition group">
+              <button @click="handleLogout"
+                class="flex items-center w-full px-4 py-3 text-sm font-medium text-red-600 rounded-lg hover:bg-red-50 transition group text-left">
                 <i class="ph ph-sign-out text-lg mr-3 group-hover:scale-110 transition-transform"></i>
                 로그아웃
-              </a>
+              </button>
             </div>
           </div>
         </transition>
@@ -385,10 +385,10 @@
 
         <!-- Drawer Footer -->
         <div class="p-4 border-t border-gray-100 bg-gray-50">
-          <a :href="logoutUrl"
+          <button @click="handleLogout"
             class="flex items-center justify-center w-full px-4 py-3 border border-red-200 text-red-700 font-bold rounded-xl hover:bg-red-50 transition shadow-sm">
             <i class="ph ph-sign-out text-xl mr-2"></i> 로그아웃
-          </a>
+          </button>
         </div>
       </nav>
     </div>

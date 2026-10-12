@@ -9,11 +9,27 @@ const UserService = {
    * - user 시트에 등록된 이메일인지 확인
    * - enabled 상태 확인
    */
-  checkSession() {
+  checkSession(clientEmail) {
     try {
-      const email = Session.getActiveUser().getEmail();
+      // 1순위: Session.getActiveUser().getEmail() (소유자 계정 및 동일 Workspace 도메인 자동 감지)
+      let email = Session.getActiveUser().getEmail();
+
+      // 2순위: UserProperties에 저장된 로그인 세션 확인
       if (!email) {
-        return Util.createResponse(false, null, '구글 계정 정보를 가져올 수 없습니다.');
+        try {
+          email = PropertiesService.getUserProperties().getProperty('LOGIN_EMAIL');
+        } catch (propErr) {
+          console.warn('[UserService] UserProperties 조회 실패:', propErr.message);
+        }
+      }
+
+      // 3순위: 클라이언트 로컬스토리지 보조 세션 이메일
+      if (!email && clientEmail && typeof clientEmail === 'string') {
+        email = clientEmail.trim();
+      }
+
+      if (!email) {
+        return Util.createResponse(false, { needLogin: true }, '로그인이 필요합니다.');
       }
 
       // 모든 사용자 로드 (ORM 방식)
@@ -23,13 +39,19 @@ const UserService = {
       const user = users.find(u => String(u.user_email).toLowerCase() === email.toLowerCase());
 
       if (!user) {
-        // 등록되지 않은 사용자
-        return Util.createResponse(false, { email: email }, `등록되지 않은 사용자입니다. (${email})`);
+        // 등록되지 않은 사용자 -> 세션 삭제 후 안내
+        try { PropertiesService.getUserProperties().deleteProperty('LOGIN_EMAIL'); } catch (_) {}
+        return Util.createResponse(false, { email: email, notRegistered: true }, `등록되지 않은 사용자입니다. (${email})`);
       }
 
       if (!user.enabled) {
-        return Util.createResponse(false, { email: email }, '비활성화된 계정입니다. 관리자에게 문의하세요.');
+        return Util.createResponse(false, { email: email, disabled: true }, '비활성화된 계정입니다. 관리자에게 문의하세요.');
       }
+
+      // 세션 유지 보장
+      try {
+        PropertiesService.getUserProperties().setProperty('LOGIN_EMAIL', user.user_email);
+      } catch (_) {}
 
       // 권한 조회
       let allowedBranchIds = [];
@@ -53,6 +75,68 @@ const UserService = {
     } catch (e) {
       console.log(`[UserService] Session Check Error: ${e.message}`);
       return Util.createResponse(false, null, `인증 오류: ${e.message}`);
+    }
+  },
+
+  /**
+   * [Auth] 이메일 기반 간이 로그인 (UserProperties 세션 저장)
+   */
+  login(email) {
+    try {
+      if (!email || typeof email !== 'string') {
+        return Util.createResponse(false, null, '이메일을 입력해 주세요.');
+      }
+
+      const targetEmail = email.trim().toLowerCase();
+      const users = Util.getSheetDataAsObjects(Config.SHEET_NAMES.USER);
+      const user = users.find(u => String(u.user_email).toLowerCase() === targetEmail);
+
+      if (!user) {
+        return Util.createResponse(false, null, `등록되지 않은 계정입니다: ${email}`);
+      }
+
+      if (!user.enabled) {
+        return Util.createResponse(false, null, '비활성화된 계정입니다. 관리자에게 문의하세요.');
+      }
+
+      // UserProperties에 세션 저장
+      try {
+        PropertiesService.getUserProperties().setProperty('LOGIN_EMAIL', user.user_email);
+      } catch (e) {
+        console.warn('[UserService] 세션 저장 실패:', e.message);
+      }
+
+      let allowedBranchIds = [];
+      if (user.role === Config.USER_ROLES.ADMIN) {
+        allowedBranchIds = ['all'];
+      } else {
+        allowedBranchIds = this.fetchUserPermissions(user.id);
+      }
+
+      const userInfo = {
+        id: user.id,
+        user_email: user.user_email,
+        user_name: user.user_name,
+        role: user.role,
+        allowedBranchIds: allowedBranchIds
+      };
+
+      return Util.createResponse(true, userInfo);
+    } catch (e) {
+      console.log(`[UserService] Login Error: ${e.message}`);
+      return Util.createResponse(false, null, `로그인 실패: ${e.message}`);
+    }
+  },
+
+  /**
+   * [Auth] 세션 로그아웃
+   */
+  logout() {
+    try {
+      PropertiesService.getUserProperties().deleteProperty('LOGIN_EMAIL');
+      return Util.createResponse(true, null, '로그아웃 되었습니다.');
+    } catch (e) {
+      return Util.createResponse(false, null, e.message);
     }
   },
 

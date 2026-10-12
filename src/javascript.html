@@ -1,24 +1,6 @@
 <script>
   console.log("--- JAVASCRIPT START (Mail Template Logic Refined) ---");
 
-  window.handleGoogleCredential = function (response) {
-    const idToken = response.credential;
-    
-    google.script.run
-      .withSuccessHandler(res => {
-        if (res.success) {
-          // Vue 앱 다시 초기화
-          location.reload();
-        } else {
-          alert(res.message || '접근 권한이 없습니다.');
-        }
-      })
-      .withFailureHandler(err => {
-        console.error(err);
-        alert('로그인 처리 실패');
-      })
-      .apiLoginWithGoogle(idToken);
-  };
 
   const { createApp, ref, computed, onMounted, onUnmounted, reactive, toRefs, watch, nextTick, getCurrentInstance } = Vue;
 
@@ -89,6 +71,9 @@
       const isModalLoading = ref(false);
       const appState = ref('initializing');
       const deniedMessage = ref('');
+      const loginEmail = ref('');
+      const isLoggingIn = ref(false);
+      const loginError = ref('');
       const currentView = ref('list');
       const syncCountdown = ref(60);
       const isSyncing = ref(false);
@@ -2330,12 +2315,68 @@
         return `<div class="prose max-w-none">${processed}</div>`;
       };
 
+      const handleLogin = async () => {
+        if (!loginEmail.value || !loginEmail.value.trim()) return;
+        try {
+          isLoggingIn.value = true;
+          loginError.value = '';
+          const res = await runGoogleScript('apiLogin', loginEmail.value.trim());
+          if (!res.success) {
+            loginError.value = res.message || '로그인에 실패했습니다.';
+            return;
+          }
+          localStorage.setItem('WANG_RMS_SESSION_EMAIL', res.data.user_email);
+          currentUser.value = res.data;
+          loadingMessage.value = '데이터 불러오는 중...';
+          isLoading.value = true;
+          await refreshInitialData(false);
+          appState.value = 'authorized';
+        } catch (err) {
+          console.error('[handleLogin Error]', err);
+          loginError.value = err.message || '로그인 처리 중 오류가 발생했습니다.';
+        } finally {
+          isLoggingIn.value = false;
+          isLoading.value = false;
+        }
+      };
+
+      const handleLogout = async () => {
+        try {
+          localStorage.removeItem('WANG_RMS_SESSION_EMAIL');
+          await runGoogleScriptSilent('apiLogout');
+        } catch (_) {}
+        currentUser.value = null;
+        loginEmail.value = '';
+        loginError.value = '';
+        isProfileDropdownOpen.value = false;
+        isMobileMenuOpen.value = false;
+        appState.value = 'login';
+      };
+
+      const handleGoToLogin = () => {
+        loginError.value = '';
+        loginEmail.value = '';
+        appState.value = 'login';
+      };
+
       const initApp = async () => {
         try {
           loadingMessage.value = '유저 정보 확인 중...';
-          const auth = await runReadGoogleScript('apiCheckSession');
-          if (!auth.success) { appState.value = 'denied'; deniedMessage.value = auth.message; return; }
+          const savedEmail = localStorage.getItem('WANG_RMS_SESSION_EMAIL');
+          const auth = await runReadGoogleScript('apiCheckSession', savedEmail || '');
+          if (!auth.success) {
+            if (auth.data && auth.data.needLogin) {
+              appState.value = 'login';
+              isLoading.value = false;
+              return;
+            }
+            appState.value = 'denied';
+            deniedMessage.value = auth.message;
+            isLoading.value = false;
+            return;
+          }
           currentUser.value = auth.data;
+          localStorage.setItem('WANG_RMS_SESSION_EMAIL', auth.data.user_email);
           if (currentUser.value.role === 'viewer') currentView.value = 'list';
 
           const todayObj = new Date();
@@ -2527,6 +2568,7 @@
         isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid, isReservationDirty, isSystemDirty, isMailDirty, toast, cellTip, showCellTip, hideCellTip, copyToClipboard,
         handleSaveReservation, isStatusDropdownOpen, toggleStatusDropdown, setReservationStatus, depositAmountDisplay, handleDepositAmountInput, handleDepositAmountKeydown, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder,
         renderPreview, isPreviewMode, togglePreview,
+        loginEmail, isLoggingIn, loginError, handleLogin, handleLogout, handleGoToLogin,
         BASE_WEBAPP_URL, appVersion, appLogo
       };
     }
