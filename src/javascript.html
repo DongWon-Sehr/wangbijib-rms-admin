@@ -71,6 +71,8 @@
       const isModalLoading = ref(false);
       const appState = ref('initializing');
       const deniedMessage = ref('');
+      const GOOGLE_CLIENT_ID = '25112068693-uq5e9eugragj3bpohef0qmh0m0vuifi0.apps.googleusercontent.com';
+      const showEmailForm = ref(false);
       const loginEmail = ref('');
       const isLoggingIn = ref(false);
       const loginError = ref('');
@@ -329,19 +331,36 @@
         });
       };
 
+      const runAuthCheck = (savedEmail) => {
+        return new Promise((resolve) => {
+          google.script.run
+            .withSuccessHandler((res) => {
+              isLoading.value = false;
+              loadingMessage.value = '';
+              resolve(res || { success: false, data: { needLogin: true }, message: '로그인이 필요합니다.' });
+            })
+            .withFailureHandler((err) => {
+              isLoading.value = false;
+              loadingMessage.value = '';
+              console.warn('[runAuthCheck Failure]', err);
+              resolve({ success: false, data: { needLogin: true }, message: String(err && err.message || err) });
+            })
+            .apiCheckSession(savedEmail || '');
+        });
+      };
+
       const retryableReadApis = new Set([
-        'apiCheckSession', 'apiGetBranches', 'apiGetReservations', 'apiGetSlotMasters',
+        'apiGetBranches', 'apiGetReservations', 'apiGetSlotMasters',
         'apiGetSlotDefaults', 'apiGetSlotOverrides', 'apiGetMailTemplates',
         'apiGetDuplicateGroups', 'apiGetBouncedEmails', 'apiGetUsers'
       ]);
-      const runReadGoogleScript = async (funcName) => {
+      const runReadGoogleScript = async (funcName, ...args) => {
         if (!retryableReadApis.has(funcName)) throw new Error('조회 API가 아닙니다: ' + funcName);
-        // 인증 단계는 기존 로딩 종료 처리도 유지한다.
-        const invoke = funcName === 'apiCheckSession' ? runGoogleScript : runGoogleScriptSilent;
+        const invoke = runGoogleScriptSilent;
 
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
-            return await invoke(funcName);
+            return await invoke(funcName, ...args);
           } catch (err) {
             const message = String(err && err.message || err);
             const isStorageInternalError = message.includes('server error occurred while reading from storage')
@@ -2353,6 +2372,60 @@
         appState.value = 'login';
       };
 
+      const handleGoogleLogin = () => {
+        if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
+          loginError.value = '구글 로그인 모듈을 불러오는 중입니다. 잠시 후 다시 시도해 주세요.';
+          return;
+        }
+        loginError.value = '';
+        isLoggingIn.value = true;
+
+        try {
+          const tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: 'email profile openid',
+            callback: async (tokenResponse) => {
+              if (tokenResponse.error) {
+                isLoggingIn.value = false;
+                console.error('[Google OAuth Error]', tokenResponse);
+                loginError.value = '구글 로그인 실패: ' + (tokenResponse.error_description || tokenResponse.error);
+                return;
+              }
+
+              if (tokenResponse.access_token) {
+                try {
+                  loadingMessage.value = '구글 계정 인증 및 권한 확인 중...';
+                  isLoading.value = true;
+                  const res = await runGoogleScript('apiLoginWithGoogle', tokenResponse.access_token);
+                  if (!res.success) {
+                    loginError.value = res.message || '인증에 실패했습니다.';
+                    return;
+                  }
+                  currentUser.value = res.data;
+                  localStorage.setItem('WANG_RMS_SESSION_EMAIL', res.data.user_email);
+                  await refreshInitialData(false);
+                  appState.value = 'authorized';
+                } catch (err) {
+                  console.error('[Google Login API Error]', err);
+                  loginError.value = err.message || '로그인 처리 중 오류가 발생했습니다.';
+                } finally {
+                  isLoggingIn.value = false;
+                  isLoading.value = false;
+                }
+              } else {
+                isLoggingIn.value = false;
+              }
+            }
+          });
+
+          tokenClient.requestAccessToken({ prompt: 'select_account' });
+        } catch (err) {
+          isLoggingIn.value = false;
+          console.error('[initTokenClient Error]', err);
+          loginError.value = 'Google 로그인 팝업 실행 실패: ' + err.message;
+        }
+      };
+
       const handleGoToLogin = () => {
         loginError.value = '';
         loginEmail.value = '';
@@ -2363,7 +2436,7 @@
         try {
           loadingMessage.value = '유저 정보 확인 중...';
           const savedEmail = localStorage.getItem('WANG_RMS_SESSION_EMAIL');
-          const auth = await runReadGoogleScript('apiCheckSession', savedEmail || '');
+          const auth = await runAuthCheck(savedEmail || '');
           if (!auth.success) {
             if (auth.data && auth.data.needLogin) {
               appState.value = 'login';
@@ -2568,7 +2641,7 @@
         isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid, isReservationDirty, isSystemDirty, isMailDirty, toast, cellTip, showCellTip, hideCellTip, copyToClipboard,
         handleSaveReservation, isStatusDropdownOpen, toggleStatusDropdown, setReservationStatus, depositAmountDisplay, handleDepositAmountInput, handleDepositAmountKeydown, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder,
         renderPreview, isPreviewMode, togglePreview,
-        loginEmail, isLoggingIn, loginError, handleLogin, handleLogout, handleGoToLogin,
+        loginEmail, isLoggingIn, loginError, showEmailForm, handleGoogleLogin, handleLogin, handleLogout, handleGoToLogin,
         BASE_WEBAPP_URL, appVersion, appLogo
       };
     }

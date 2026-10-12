@@ -8,6 +8,9 @@ const Config = {
   // 0-1. BI 로고 (스크립트 소유 계정 Drive 파일)
   LOGO_FILE_ID: '1Ni3HhXrloRWe_idt2XeroEvcS--n6BK9',
 
+  // 0-2. Google OAuth Client ID
+  GOOGLE_CLIENT_ID: '25112068693-uq5e9eugragj3bpohef0qmh0m0vuifi0.apps.googleusercontent.com',
+
   // 1. Spreadsheet ID
   SPREADSHEET_ID: SpreadsheetApp.getActiveSpreadsheet().getId(),
 

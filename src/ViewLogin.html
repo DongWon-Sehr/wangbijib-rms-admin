@@ -1,67 +1,103 @@
-<!-- ViewLogin.html (로그인 화면) -->
-<div class="h-full flex items-center justify-center p-4 bg-gradient-to-br from-gray-50 to-gray-200">
-  <div class="max-w-md w-full bg-white p-8 sm:p-10 rounded-2xl shadow-2xl border border-gray-100 text-center relative overflow-hidden">
+<!-- ViewLogin.html (공식 Google 로그인 화면) -->
+<div class="h-full flex items-center justify-center p-4 bg-gradient-to-br from-gray-50 via-gray-100 to-gray-200">
+  <div class="max-w-md w-full bg-white p-8 sm:p-10 rounded-3xl shadow-2xl border border-gray-100 text-center relative overflow-hidden">
     
-    <!-- Top Decorative Line -->
-    <div class="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-primary-600 via-primary-500 to-amber-500"></div>
+    <!-- Top Decorative Line (Copper to Gold Gradient) -->
+    <div class="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-primary-700 via-primary-500 to-amber-500"></div>
 
-    <!-- Logo / Icon -->
-    <div class="mb-6 flex flex-col items-center">
-      <img v-if="appLogo" :src="appLogo" alt="왕비집 BI" class="h-16 w-auto object-contain mb-2">
-      <div v-else class="w-16 h-16 rounded-2xl bg-primary-50 text-primary-600 flex items-center justify-center mb-2 shadow-inner border border-primary-100">
+    <!-- Logo / Title -->
+    <div class="mb-7 flex flex-col items-center">
+      <img v-if="appLogo" :src="appLogo" alt="왕비집 BI" class="h-16 w-auto object-contain mb-2.5">
+      <div v-else class="w-16 h-16 rounded-2xl bg-primary-50 text-primary-600 flex items-center justify-center mb-2.5 shadow-inner border border-primary-100">
         <i class="ph ph-crown-simple text-4xl text-amber-500"></i>
       </div>
-      <h1 class="text-2xl font-extrabold text-gray-900 tracking-tight">왕비집 예약관리 시스템</h1>
-      <p class="text-xs text-primary-700 font-semibold tracking-widest uppercase mt-1">PREMIUM DINING RMS</p>
+      <h1 class="text-2xl font-black text-gray-900 tracking-tight">왕비집 예약관리 시스템</h1>
+      <p class="text-[11px] text-primary-700 font-bold tracking-widest uppercase mt-1">PREMIUM DINING RMS</p>
     </div>
 
     <!-- Instructions -->
-    <p class="text-sm text-gray-500 mb-6 leading-relaxed">
-      등록된 관리자 및 직원 계정의 이메일을 입력하여 로그인하세요.
+    <p class="text-xs sm:text-sm text-gray-500 mb-6 leading-relaxed">
+      왕비집 관리자 및 권한이 부여된 Google 계정으로 로그인하세요.
     </p>
 
     <!-- Error Alert -->
-    <div v-if="loginError" class="mb-5 p-3.5 bg-red-50 border border-red-200 rounded-xl text-left flex items-start gap-2.5">
+    <div v-if="loginError" class="mb-5 p-3.5 bg-red-50 border border-red-200 rounded-xl text-left flex items-start gap-2.5 animate-shake">
       <i class="ph ph-warning-circle text-red-600 text-lg flex-shrink-0 mt-0.5"></i>
-      <div class="text-xs text-red-700 font-medium leading-relaxed">{{ loginError }}</div>
+      <div class="text-xs text-red-700 font-medium leading-relaxed whitespace-pre-line">{{ loginError }}</div>
     </div>
 
-    <!-- Login Form -->
-    <form @submit.prevent="handleLogin" class="space-y-4 text-left">
-      <div>
-        <label for="login-email" class="block text-xs font-bold text-gray-700 mb-1.5">이메일 주소</label>
-        <div class="relative">
-          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
-            <i class="ph ph-envelope-simple text-lg"></i>
-          </div>
-          <input
-            id="login-email"
-            type="email"
-            v-model="loginEmail"
-            :disabled="isLoggingIn"
-            required
-            autocomplete="email"
-            placeholder="예: dongwon.sehr@gmail.com"
-            class="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-300 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:bg-white transition"
-          />
-        </div>
+    <!-- 1. Main Action: Official Google Login Button -->
+    <div class="space-y-4">
+      <button
+        type="button"
+        @click="handleGoogleLogin"
+        :disabled="isLoggingIn"
+        class="w-full py-3.5 px-4 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-bold rounded-2xl border border-gray-300 shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-3 disabled:opacity-60 disabled:cursor-not-allowed group relative overflow-hidden"
+      >
+        <!-- Google 4-Color 'G' Icon SVG -->
+        <svg v-if="!isLoggingIn" class="w-5 h-5 flex-shrink-0 group-hover:scale-105 transition-transform" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+        </svg>
+
+        <i v-else class="ph ph-spinner animate-spin text-xl text-primary-600"></i>
+
+        <span class="text-sm font-semibold text-gray-800">
+          {{ isLoggingIn ? 'Google 계정 확인 중...' : 'Google 계정으로 로그인' }}
+        </span>
+      </button>
+
+      <!-- Optional Direct Email Access Toggle (Backup) -->
+      <div class="pt-2">
+        <button
+          type="button"
+          @click="showEmailForm = !showEmailForm"
+          class="text-[11px] text-gray-400 hover:text-gray-600 underline font-medium transition"
+        >
+          {{ showEmailForm ? '이메일 직접 입력창 닫기' : '팝업이 차단되는 경우: 이메일로 접속' }}
+        </button>
       </div>
 
-      <button
-        type="submit"
-        :disabled="isLoggingIn || !loginEmail"
-        class="w-full py-3.5 px-4 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm"
+      <!-- Backup Email Input Form -->
+      <transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0 -translate-y-2"
+        enter-to-class="opacity-100 translate-y-0"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 -translate-y-2"
       >
-        <i v-if="isLoggingIn" class="ph ph-spinner animate-spin text-lg"></i>
-        <i v-else class="ph ph-sign-in text-lg"></i>
-        <span>{{ isLoggingIn ? '로그인 확인 중...' : '시스템 접속' }}</span>
-      </button>
-    </form>
+        <form v-if="showEmailForm" @submit.prevent="handleLogin" class="mt-3 p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3 text-left">
+          <div>
+            <label for="backup-login-email" class="block text-[11px] font-bold text-gray-600 mb-1">등록된 이메일 주소</label>
+            <input
+              id="backup-login-email"
+              type="email"
+              v-model="loginEmail"
+              :disabled="isLoggingIn"
+              required
+              placeholder="예: dongwon.sehr@gmail.com"
+              class="w-full px-3 py-2 text-xs bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500"
+            />
+          </div>
+          <button
+            type="submit"
+            :disabled="isLoggingIn || !loginEmail"
+            class="w-full py-2 bg-gray-700 hover:bg-gray-800 text-white font-bold rounded-lg text-xs transition"
+          >
+            접속 시도
+          </button>
+        </form>
+      </transition>
+    </div>
 
-    <!-- Footer Note -->
-    <div class="mt-8 pt-6 border-t border-gray-100 text-center">
-      <p class="text-[11px] text-gray-400">
-        계정 등록 및 권한 문의는 시스템 관리자에게 문의해 주세요.
+    <!-- Security Note -->
+    <div class="mt-8 pt-5 border-t border-gray-100 text-center">
+      <p class="text-[11px] text-gray-400 flex items-center justify-center gap-1">
+        <i class="ph ph-shield-check text-green-600 text-sm"></i>
+        <span>Google OAuth 2.0 보안 인증 적용</span>
       </p>
     </div>
 

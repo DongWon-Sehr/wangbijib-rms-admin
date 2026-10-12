@@ -60,6 +60,10 @@ function apiLogin(email) {
   return _executeApi('apiLogin', () => UserService.login(email));
 }
 
+function apiLoginWithGoogle(token) {
+  return _executeApi('apiLoginWithGoogle', () => UserService.loginWithGoogle(token));
+}
+
 function apiLogout() {
   return _executeApi('apiLogout', () => UserService.logout());
 }

@@ -129,6 +129,79 @@ const UserService = {
   },
 
   /**
+   * [Auth] Google OAuth2 Access Token 기반 정식 구글 로그인 검증
+   */
+  loginWithGoogle(accessToken) {
+    try {
+      if (!accessToken || typeof accessToken !== 'string') {
+        return Util.createResponse(false, null, '유효한 Google 인증 토큰이 전달되지 않았습니다.');
+      }
+
+      // Google OAuth2 UserInfo 엔드포인트 호출
+      const userInfoUrl = 'https://www.googleapis.com/oauth2/v3/userinfo';
+      const response = UrlFetchApp.fetch(userInfoUrl, {
+        headers: {
+          'Authorization': 'Bearer ' + accessToken.trim()
+        },
+        muteHttpExceptions: true
+      });
+
+      const responseCode = response.getResponseCode();
+      if (responseCode !== 200) {
+        console.warn(`[UserService] Google UserInfo 조회 실패 (${responseCode}):`, response.getContentText());
+        return Util.createResponse(false, null, 'Google 계정 정보 검증에 실패했습니다. (만료되었거나 유효하지 않은 토큰)');
+      }
+
+      const profile = JSON.parse(response.getContentText());
+      const email = profile.email;
+
+      if (!email) {
+        return Util.createResponse(false, null, 'Google 계정에서 이메일 정보를 확인할 수 없습니다.');
+      }
+
+      // user 시트에서 등록 사용자 확인
+      const users = Util.getSheetDataAsObjects(Config.SHEET_NAMES.USER);
+      const user = users.find(u => String(u.user_email).toLowerCase() === email.toLowerCase());
+
+      if (!user) {
+        return Util.createResponse(false, null, `등록되지 않은 Google 계정입니다: ${email}\n관리자에게 계정 등록을 요청해 주세요.`);
+      }
+
+      if (!user.enabled) {
+        return Util.createResponse(false, null, '비활성화된 계정입니다. 관리자에게 문의하세요.');
+      }
+
+      // UserProperties에 세션 저장 (Google 공식 인증 통과)
+      try {
+        PropertiesService.getUserProperties().setProperty('LOGIN_EMAIL', user.user_email);
+      } catch (e) {
+        console.warn('[UserService] 세션 저장 실패:', e.message);
+      }
+
+      let allowedBranchIds = [];
+      if (user.role === Config.USER_ROLES.ADMIN) {
+        allowedBranchIds = ['all'];
+      } else {
+        allowedBranchIds = this.fetchUserPermissions(user.id);
+      }
+
+      const userInfo = {
+        id: user.id,
+        user_email: user.user_email,
+        user_name: user.user_name || profile.name || '',
+        role: user.role,
+        allowedBranchIds: allowedBranchIds,
+        picture: profile.picture || ''
+      };
+
+      return Util.createResponse(true, userInfo);
+    } catch (e) {
+      console.log(`[UserService] Google Login Error: ${e.message}`);
+      return Util.createResponse(false, null, `구글 로그인 처리 중 오류 발생: ${e.message}`);
+    }
+  },
+
+  /**
    * [Auth] 세션 로그아웃
    */
   logout() {
