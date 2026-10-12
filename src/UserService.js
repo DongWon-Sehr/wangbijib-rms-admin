@@ -1,10 +1,28 @@
 /** Google OAuth 로그인과 서버 세션. Execute as Me 환경에서 UserProperties는 사용자별 저장소가 아니다. */
 const UserService = {
-  SESSION_SECONDS: 21600,
+  SESSION_SECONDS: 7 * 24 * 60 * 60,
+  CACHE_SECONDS: 21600,
   STATE_SECONDS: 600,
 
   randomToken() {
     return Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  },
+
+  sessionKey(token) {
+    const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token);
+    return 'WANG_RMS_AUTH_' + Utilities.base64EncodeWebSafe(digest).replace(/=+$/, '');
+  },
+
+  pruneExpiredSessions(properties) {
+    const now = Date.now();
+    const all = properties.getProperties();
+    Object.keys(all).forEach(key => {
+      if (!key.startsWith('WANG_RMS_AUTH_')) return;
+      try {
+        if (JSON.parse(all[key]).expiresAt > now) return;
+      } catch (_) {}
+      properties.deleteProperty(key);
+    });
   },
 
   beginGoogleLogin(redirectUri) {
@@ -63,7 +81,12 @@ const UserService = {
     if (!profile.email || profile.email_verified !== true) throw new Error('인증된 Google 이메일을 확인할 수 없습니다.');
     const user = this.findEnabledUser(profile.email);
     const sessionToken = this.randomToken();
-    cache.put('session_' + sessionToken, String(user.user_email), this.SESSION_SECONDS);
+    const sessionKey = this.sessionKey(sessionToken);
+    const record = JSON.stringify({ email: String(user.user_email), expiresAt: Date.now() + this.SESSION_SECONDS * 1000 });
+    const properties = PropertiesService.getScriptProperties();
+    this.pruneExpiredSessions(properties);
+    properties.setProperty(sessionKey, record);
+    cache.put(sessionKey, record, this.CACHE_SECONDS);
     return { token: sessionToken, state: state };
   },
 
@@ -80,9 +103,24 @@ const UserService = {
       if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) {
         return Util.createResponse(false, { needLogin: true }, '로그인이 필요합니다.');
       }
-      const email = CacheService.getScriptCache().get('session_' + token);
-      if (!email) return Util.createResponse(false, { needLogin: true }, '로그인 세션이 만료되었습니다.');
-      const user = this.findEnabledUser(email);
+      const cache = CacheService.getScriptCache();
+      const properties = PropertiesService.getScriptProperties();
+      const key = this.sessionKey(token);
+      const cached = cache.get(key);
+      const saved = cached || properties.getProperty(key);
+      if (!saved) return Util.createResponse(false, { needLogin: true }, '로그인 세션이 만료되었습니다.');
+      let record;
+      try { record = JSON.parse(saved); } catch (_) { record = null; }
+      if (!record || !record.email || !record.expiresAt || record.expiresAt <= Date.now()) {
+        cache.remove(key);
+        properties.deleteProperty(key);
+        return Util.createResponse(false, { needLogin: true }, '로그인 세션이 만료되었습니다.');
+      }
+      if (!cached) {
+        const remaining = Math.ceil((record.expiresAt - Date.now()) / 1000);
+        cache.put(key, saved, Math.max(1, Math.min(this.CACHE_SECONDS, remaining)));
+      }
+      const user = this.findEnabledUser(record.email);
       const allowedBranchIds = user.role === Config.USER_ROLES.ADMIN ? ['all'] : this.fetchUserPermissions(user.id);
       return Util.createResponse(true, {
         id: user.id,
@@ -98,7 +136,9 @@ const UserService = {
 
   logout(token) {
     if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) {
-      CacheService.getScriptCache().remove('session_' + token);
+      const key = this.sessionKey(token);
+      CacheService.getScriptCache().remove(key);
+      PropertiesService.getScriptProperties().deleteProperty(key);
     }
     return Util.createResponse(true, null, '로그아웃 되었습니다.');
   },

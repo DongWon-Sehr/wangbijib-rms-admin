@@ -72,7 +72,7 @@
       const appState = ref('initializing');
       const deniedMessage = ref('');
       const googleLoginUrl = ref('');
-      let sessionToken = sessionStorage.getItem('WANG_RMS_SESSION_TOKEN') || '';
+      let sessionToken = localStorage.getItem('WANG_RMS_SESSION_TOKEN') || '';
       localStorage.removeItem('WANG_RMS_SESSION_EMAIL');
       const loginError = ref('');
       const currentView = ref('list');
@@ -411,6 +411,13 @@
       // ============================================================
       const branchMapKo = computed(() => branches.value.reduce((m, b) => { m[b.id] = b.branch_name_ko; return m; }, {}));
       const branchMapEn = computed(() => branches.value.reduce((m, b) => { m[b.id] = b.branch_name_en; return m; }, {}));
+      const filterableBranches = computed(() => {
+        const user = currentUser.value;
+        if (!user) return [];
+        if (user.role === 'admin') return branches.value;
+        const allowed = new Set(user.allowedBranchIds || []);
+        return branches.value.filter(branch => allowed.has(branch.id));
+      });
 
       // --- 이메일 형식, 도메인 오타 및 반송(Bounce) 검증 ---
       const EMAIL_TYPO_MAP = {
@@ -1272,7 +1279,8 @@
           duplicateGroupsData.value = results[6]?.data || [];
           bouncedEmailsData.value = results[7]?.data || [];
           if (currentUser.value.role === 'admin' && results[8]) users.value = results[8].data || [];
-        } catch (e) { console.error(e); if (!silent) await showCustomAlert('오류', '데이터 갱신 실패: ' + e.message); } 
+          return true;
+        } catch (e) { console.error(e); if (!silent) await showCustomAlert('오류', '데이터 갱신 실패: ' + e.message); return false; }
         finally { if (!silent) isLoading.value = false; }
       };
 
@@ -2120,6 +2128,7 @@
       };
 
       const handleSystemSave = async () => {
+        if (isModalLoading.value) return;
         let d = localData.value;
         let type = activeSystemData.value.type;
         let apiType = type;
@@ -2165,15 +2174,41 @@
         }
 
         isModalLoading.value = true;
+        let notice;
         try {
-          const res = await runGoogleScriptSilent('apiSaveSystemSettings', apiType, d);
-          if (res.success) { showCustomAlert("완료", "저장됨"); await refreshInitialData(); closeModal('system'); }
-          else showCustomAlert("오류", res.message);
+          await runGoogleScriptSilent('apiSaveSystemSettings', apiType, d);
+          let needsLogin = false;
+          if (type === 'user') {
+            const auth = await runAuthCheck(sessionToken);
+            if (auth.success) {
+              currentUser.value = auth.data;
+              if (auth.data.role !== 'admin') {
+                filterBranchIds.value = filterBranchIds.value.filter(id => auth.data.allowedBranchIds.includes(id));
+                users.value = [];
+                if (currentView.value === 'settings') currentView.value = 'list';
+              }
+            } else {
+              await handleLogout();
+              needsLogin = true;
+            }
+          }
+          if (needsLogin) {
+            closeModal('system');
+            notice = ['완료', '저장됐습니다. 변경된 계정 상태를 적용하려면 다시 로그인해 주세요.'];
+          } else {
+            const refreshed = await refreshInitialData(true);
+            closeModal('system');
+            notice = refreshed
+              ? ['완료', '저장됨']
+              : ['알림', '저장은 완료됐지만 목록 갱신에 실패했습니다. 새로고침 후 확인해 주세요.'];
+          }
         } catch(e) {
-          showCustomAlert("오류", e.message);
+          notice = ['오류', e.message];
         } finally {
           isModalLoading.value = false;
         }
+        await nextTick();
+        showCustomAlert(...notice);
       };
       
       // 슬롯 일괄수정 프리셋: 기준 시각(17시) 이전/이후 시간대를 슬롯 0 / 활성화 ON으로 일괄 마감
@@ -2357,6 +2392,7 @@
       const handleLogout = async () => {
         const oldToken = sessionToken;
         sessionToken = '';
+        localStorage.removeItem('WANG_RMS_SESSION_TOKEN');
         sessionStorage.removeItem('WANG_RMS_SESSION_TOKEN');
         sessionStorage.removeItem('WANG_RMS_OAUTH_STATE');
         try {
@@ -2364,6 +2400,7 @@
             .withSuccessHandler(resolve).withFailureHandler(resolve).apiLogout(oldToken));
         } catch (_) {}
         currentUser.value = null;
+        filterBranchIds.value = [];
         loginError.value = '';
         googleLoginUrl.value = '';
         isProfileDropdownOpen.value = false;
@@ -2387,10 +2424,10 @@
             sessionStorage.removeItem('WANG_RMS_OAUTH_STATE');
             if (expectedState && callback.state === expectedState && callback.token && !callback.error) {
               sessionToken = callback.token;
-              sessionStorage.setItem('WANG_RMS_SESSION_TOKEN', sessionToken);
+              localStorage.setItem('WANG_RMS_SESSION_TOKEN', sessionToken);
             } else {
               sessionToken = '';
-              sessionStorage.removeItem('WANG_RMS_SESSION_TOKEN');
+              localStorage.removeItem('WANG_RMS_SESSION_TOKEN');
               loginError.value = callback.error || '로그인 요청이 일치하지 않습니다. 다시 시도해 주세요.';
             }
             // 인증 코드는 1회용이며 URL 기록에 남기지 않는다.
@@ -2399,6 +2436,8 @@
           const auth = await runAuthCheck(sessionToken);
           if (!auth.success) {
             if (auth.data && auth.data.needLogin) {
+              sessionToken = '';
+              localStorage.removeItem('WANG_RMS_SESSION_TOKEN');
               appState.value = 'login';
               isLoading.value = false;
               prepareGoogleLogin();
@@ -2568,7 +2607,7 @@
         filterIssueType, selectedReservationIds,
         sortKey, sortOrder, currentPage, itemsPerPage,
         settingsTab, currentSlotDate, selectedSlotBranchId, selectedCalendarBranchId,
-        filteredReservations, paginatedReservations, totalPage, branchMapKo, branchMapEn, slotSettingsBranches, filteredSlotBranches,
+        filteredReservations, paginatedReservations, totalPage, branchMapKo, branchMapEn, filterableBranches, slotSettingsBranches, filteredSlotBranches,
         activeCalendarId, calendarIframeSrc, slotMasterMap,
         notifications, notificationCount,
         emailErrorReservations, duplicateGroups, duplicateGroupTotalCount, duplicateGroupMap, activeReservationDuplicateGroup,

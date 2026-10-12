@@ -64,8 +64,9 @@
       <!-- 1) 지점 필터 그룹 -->
       <div class="flex flex-wrap gap-2 items-center min-w-0">
         <span class="text-xs font-bold text-gray-500 uppercase mr-1 whitespace-nowrap">지점 필터:</span>
+        <span v-if="filterableBranches.length === 0" class="text-xs text-gray-400">접근 가능한 지점 없음</span>
         <button
-          v-for="branch in branches"
+          v-for="branch in filterableBranches"
           :key="branch.id"
           @click="toggleBranchFilter(branch.id)"
           :class="{ 
@@ -209,8 +210,9 @@
           </button>
         </div>
         <div class="flex flex-wrap gap-2">
+          <span v-if="filterableBranches.length === 0" class="text-xs text-gray-400">접근 가능한 지점 없음</span>
           <button
-            v-for="branch in branches"
+            v-for="branch in filterableBranches"
             :key="branch.id"
             @click="toggleBranchFilter(branch.id)"
             :class="{
