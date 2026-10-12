@@ -135,6 +135,8 @@ function repairMissingThreadIds() {
             console.log(`[Batch] (Repair) Deposit mail skipped for ${res.id}: ${mailResult.message}`);
           }
         }
+      } else {
+        console.log(`[Batch] No matching thread found for ${res.customer_name} (${res.id}).`);
       }
     });
 
