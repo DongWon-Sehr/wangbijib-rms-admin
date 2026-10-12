@@ -1,21 +1,21 @@
 
-function testGetDropdownData() {
+function testGetDropdownData_() {
   const dropdownData = getDropdownData();
   console.log('dropdownData:', dropdownData);
 }
 
-function testGetPivotedSlotData() {
+function testGetPivotedSlotData_() {
   const pivotedSlotData = getPivotedSlotData();
   console.log('pivotedSlotData:', pivotedSlotData);
 }
 
-function testGetBranchTable() {
+function testGetBranchTable_() {
   const branchTable = getSheetData(SHEET_NAMES.BRANCH, true);
 
   console.log(branchTable);
 }
 
-function testFindEmail() {
+function testFindEmail_() {
   const mailThreadId = '19a8b37b8584cbd2';
   const thread = GmailApp.getThreadById(mailThreadId);
   if (!thread) {
@@ -36,13 +36,13 @@ function testFindEmail() {
   });
 }
 
-function getUuids(count = 13) {
+function getUuids_(count = 13) {
   for (let i = 0; i < count; i++) {
     console.log(Utilities.getUuid());
   }
 }
 
-function doPostTest() {
+function doPostTest_() {
   let event = {
     postData: {
       contents: ''
@@ -55,20 +55,23 @@ function doPostTest() {
   doPost(event);
 }
 
-function getSignatureHtmlTest() {
+function getSignatureHtmlTest_() {
   const html = new GmailService().getSignatureHtml();
   console.log(html);
 }
 
-function updateReservationStatusTest(id = '3980bbea-820b-4ae3-9742-9056aca9fcca', newStatus = false) {
+function updateReservationStatusTest_(id = '3980bbea-820b-4ae3-9742-9056aca9fcca', newStatus = false) {
   const result = updateReservationStatus(id, newStatus);
 
   console.log('result:');
   console.log(result);
 }
 
-function apiSendTestMail(templateName, testEmail) {
-  return _executeApi('apiSendTestMail', () => {
+function apiSendTestMail_(token, templateName, testEmail) {
+  const auth = UserService.checkSession(token);
+  if (!auth.success) return auth;
+  if (auth.data.role !== Config.USER_ROLES.ADMIN) return Util.createResponse(false, null, '관리자 권한이 필요합니다.');
+  return _executeApi('apiSendTestMail_', () => {
     // 테스트용 더미 데이터
     const dummyData = {
       customer_name: '테스트고객',
@@ -109,14 +112,6 @@ function apiSendTestMail(templateName, testEmail) {
   });
 }
 
-function testApiSendTestMail() {
-  const testEmail = Session.getActiveUser().getEmail();
-  const templateId = Config.MAIL_TEMPLATES.DEPOSIT_PENDING; // 테스트에 사용할 템플릿 ID (Config에 정의되어 있어야 함)
-  
-  console.log(`테스트 발송 시작... 대상 이메일: ${testEmail}, 템플릿 ID: ${templateId}`);
-  const result = apiSendTestMail(templateId, testEmail);
-  console.log('발송 결과:', result);
-}
 
 
 
@@ -124,7 +119,7 @@ function testApiSendTestMail() {
  * [Test] 초기 Admin 유저 강제 생성 (테스트용)
  * - 이 함수를 실행하면 현재 스크립트 실행 유저를 Admin으로 등록합니다.
  */
-function seedInitialAdmin() {
+function seedInitialAdmin_() {
   const ss = SpreadsheetApp.openById(Config.SPREADSHEET_ID);
   const userSheet = ss.getSheetByName(Config.SHEET_NAMES.USER);
   
@@ -159,7 +154,7 @@ function seedInitialAdmin() {
   console.log(`✅ 초기 관리자 생성 완료: ${email}`);
 }
 
-function testUpdateOverrideSlotsBatchMock() {
+function testUpdateOverrideSlotsBatchMock_() {
   // 1. 기존 함수 백업
   const originalGetSpreadsheet = Util.getSpreadsheet;
   const originalSync = SlotService.syncSourceSlot;
@@ -204,7 +199,7 @@ function testUpdateOverrideSlotsBatchMock() {
 /**
  * [Migration] 예약 시트의 enabled 컬럼 체크박스를 문자열(대기/확정/취소) 지원 형태로 변환
  */
-function runEnabledColumnMigration() {
+function runEnabledColumnMigration_() {
   console.log('🚀 [Migration] 예약 시트 enabled 컬럼 마이그레이션 시작...');
   const ss = SpreadsheetApp.openById(Config.SPREADSHEET_ID);
   const sheet = ss.getSheetByName(Config.SHEET_NAMES.RESERVATION);
@@ -242,7 +237,7 @@ function runEnabledColumnMigration() {
  * [Test] 초기 Admin 유저 강제 생성 (테스트용)
  * - 이 함수를 실행하면 현재 스크립트 실행 유저를 Admin으로 등록합니다.
  */
-function seedInitialAdmin() {
+function seedInitialAdmin_() {
   const ss = SpreadsheetApp.openById(Config.SPREADSHEET_ID);
   const userSheet = ss.getSheetByName(Config.SHEET_NAMES.USER);
   
@@ -277,7 +272,7 @@ function seedInitialAdmin() {
   console.log(`✅ 초기 관리자 생성 완료: ${email}`);
 }
 
-function testUpdateOverrideSlotsBatchMock() {
+function testUpdateOverrideSlotsBatchMock_() {
   // 1. 기존 함수 백업
   const originalGetSpreadsheet = Util.getSpreadsheet;
   const originalSync = SlotService.syncSourceSlot;
@@ -321,7 +316,7 @@ function testUpdateOverrideSlotsBatchMock() {
 /**
  * [임시 유틸리티] 멈춰있는 큐 및 쓸데없는 트리거를 모두 초기화합니다.
  */
-function cleanAllQueuesAndTriggers() {
+function cleanAllQueuesAndTriggers_() {
   const props = PropertiesService.getScriptProperties();
   
   // 1. 저장된 큐 데이터 모두 삭제

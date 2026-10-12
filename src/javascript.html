@@ -71,10 +71,9 @@
       const isModalLoading = ref(false);
       const appState = ref('initializing');
       const deniedMessage = ref('');
-      const GOOGLE_CLIENT_ID = '25112068693-uq5e9eugragj3bpohef0qmh0m0vuifi0.apps.googleusercontent.com';
-      const showEmailForm = ref(false);
-      const loginEmail = ref('');
-      const isLoggingIn = ref(false);
+      const googleLoginUrl = ref('');
+      let sessionToken = sessionStorage.getItem('WANG_RMS_SESSION_TOKEN') || '';
+      localStorage.removeItem('WANG_RMS_SESSION_EMAIL');
       const loginError = ref('');
       const currentView = ref('list');
       const syncCountdown = ref(60);
@@ -315,7 +314,7 @@
             .withFailureHandler((err) => {
               finalize();
               reject(new Error(err));
-            })[funcName](arg1, arg2, arg3);
+            })[funcName](sessionToken, arg1, arg2, arg3);
         });
       };
       
@@ -327,11 +326,11 @@
             })
             .withFailureHandler((err) => {
               reject(new Error(err));
-            })[funcName](arg1, arg2, arg3);
+            })[funcName](sessionToken, arg1, arg2, arg3);
         });
       };
 
-      const runAuthCheck = (savedEmail) => {
+      const runAuthCheck = (token) => {
         return new Promise((resolve) => {
           google.script.run
             .withSuccessHandler((res) => {
@@ -345,7 +344,7 @@
               console.warn('[runAuthCheck Failure]', err);
               resolve({ success: false, data: { needLogin: true }, message: String(err && err.message || err) });
             })
-            .apiCheckSession(savedEmail || '');
+            .apiCheckSession(token || '');
         });
       };
 
@@ -2334,113 +2333,75 @@
         return `<div class="prose max-w-none">${processed}</div>`;
       };
 
-      const handleLogin = async () => {
-        if (!loginEmail.value || !loginEmail.value.trim()) return;
-        try {
-          isLoggingIn.value = true;
-          loginError.value = '';
-          const res = await runGoogleScript('apiLogin', loginEmail.value.trim());
-          if (!res.success) {
-            loginError.value = res.message || '로그인에 실패했습니다.';
-            return;
-          }
-          localStorage.setItem('WANG_RMS_SESSION_EMAIL', res.data.user_email);
-          currentUser.value = res.data;
-          loadingMessage.value = '데이터 불러오는 중...';
-          isLoading.value = true;
-          await refreshInitialData(false);
-          appState.value = 'authorized';
-        } catch (err) {
-          console.error('[handleLogin Error]', err);
-          loginError.value = err.message || '로그인 처리 중 오류가 발생했습니다.';
-        } finally {
-          isLoggingIn.value = false;
-          isLoading.value = false;
+      const prepareGoogleLogin = () => {
+        google.script.run
+          .withSuccessHandler((res) => {
+            if (!res || !res.success) {
+              loginError.value = (res && res.message) || 'Google 로그인 준비에 실패했습니다.';
+              return;
+            }
+            sessionStorage.setItem('WANG_RMS_OAUTH_STATE', res.data.state);
+            googleLoginUrl.value = res.data.url;
+          })
+          .withFailureHandler((err) => { loginError.value = String(err && err.message || err); })
+          .apiBeginGoogleLogin();
+      };
+
+      const handleGoogleLogin = (event) => {
+        if (!googleLoginUrl.value) {
+          event.preventDefault();
+          prepareGoogleLogin();
         }
       };
 
       const handleLogout = async () => {
+        const oldToken = sessionToken;
+        sessionToken = '';
+        sessionStorage.removeItem('WANG_RMS_SESSION_TOKEN');
+        sessionStorage.removeItem('WANG_RMS_OAUTH_STATE');
         try {
-          localStorage.removeItem('WANG_RMS_SESSION_EMAIL');
-          await runGoogleScriptSilent('apiLogout');
+          await new Promise(resolve => google.script.run
+            .withSuccessHandler(resolve).withFailureHandler(resolve).apiLogout(oldToken));
         } catch (_) {}
         currentUser.value = null;
-        loginEmail.value = '';
         loginError.value = '';
+        googleLoginUrl.value = '';
         isProfileDropdownOpen.value = false;
         isMobileMenuOpen.value = false;
         appState.value = 'login';
-      };
-
-      const handleGoogleLogin = () => {
-        if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
-          loginError.value = '구글 로그인 모듈을 불러오는 중입니다. 잠시 후 다시 시도해 주세요.';
-          return;
-        }
-        loginError.value = '';
-        isLoggingIn.value = true;
-
-        try {
-          const tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: GOOGLE_CLIENT_ID,
-            scope: 'email profile openid',
-            callback: async (tokenResponse) => {
-              if (tokenResponse.error) {
-                isLoggingIn.value = false;
-                console.error('[Google OAuth Error]', tokenResponse);
-                loginError.value = '구글 로그인 실패: ' + (tokenResponse.error_description || tokenResponse.error);
-                return;
-              }
-
-              if (tokenResponse.access_token) {
-                try {
-                  loadingMessage.value = '구글 계정 인증 및 권한 확인 중...';
-                  isLoading.value = true;
-                  const res = await runGoogleScript('apiLoginWithGoogle', tokenResponse.access_token);
-                  if (!res.success) {
-                    loginError.value = res.message || '인증에 실패했습니다.';
-                    return;
-                  }
-                  currentUser.value = res.data;
-                  localStorage.setItem('WANG_RMS_SESSION_EMAIL', res.data.user_email);
-                  await refreshInitialData(false);
-                  appState.value = 'authorized';
-                } catch (err) {
-                  console.error('[Google Login API Error]', err);
-                  loginError.value = err.message || '로그인 처리 중 오류가 발생했습니다.';
-                } finally {
-                  isLoggingIn.value = false;
-                  isLoading.value = false;
-                }
-              } else {
-                isLoggingIn.value = false;
-              }
-            }
-          });
-
-          tokenClient.requestAccessToken({ prompt: 'select_account' });
-        } catch (err) {
-          isLoggingIn.value = false;
-          console.error('[initTokenClient Error]', err);
-          loginError.value = 'Google 로그인 팝업 실행 실패: ' + err.message;
-        }
+        prepareGoogleLogin();
       };
 
       const handleGoToLogin = () => {
         loginError.value = '';
-        loginEmail.value = '';
         appState.value = 'login';
+        prepareGoogleLogin();
       };
 
       const initApp = async () => {
         try {
           loadingMessage.value = '유저 정보 확인 중...';
-          const savedEmail = localStorage.getItem('WANG_RMS_SESSION_EMAIL');
-          const auth = await runAuthCheck(savedEmail || '');
+          const callback = window.WANG_OAUTH_RESULT;
+          if (callback) {
+            const expectedState = sessionStorage.getItem('WANG_RMS_OAUTH_STATE');
+            sessionStorage.removeItem('WANG_RMS_OAUTH_STATE');
+            if (expectedState && callback.state === expectedState && callback.token && !callback.error) {
+              sessionToken = callback.token;
+              sessionStorage.setItem('WANG_RMS_SESSION_TOKEN', sessionToken);
+            } else {
+              sessionToken = '';
+              sessionStorage.removeItem('WANG_RMS_SESSION_TOKEN');
+              loginError.value = callback.error || '로그인 요청이 일치하지 않습니다. 다시 시도해 주세요.';
+            }
+            // 인증 코드는 1회용이며 URL 기록에 남기지 않는다.
+            if (google.script.history) google.script.history.replace({}, {}, '');
+          }
+          const auth = await runAuthCheck(sessionToken);
           if (!auth.success) {
             if (auth.data && auth.data.needLogin) {
               appState.value = 'login';
               isLoading.value = false;
+              prepareGoogleLogin();
               return;
             }
             appState.value = 'denied';
@@ -2449,7 +2410,6 @@
             return;
           }
           currentUser.value = auth.data;
-          localStorage.setItem('WANG_RMS_SESSION_EMAIL', auth.data.user_email);
           if (currentUser.value.role === 'viewer') currentView.value = 'list';
 
           const todayObj = new Date();
@@ -2641,7 +2601,7 @@
         isSelectionInvalid, isPaxInvalid, isTimeEmpty, isReservationFormValid, isReservationDirty, isSystemDirty, isMailDirty, toast, cellTip, showCellTip, hideCellTip, copyToClipboard,
         handleSaveReservation, isStatusDropdownOpen, toggleStatusDropdown, setReservationStatus, depositAmountDisplay, handleDepositAmountInput, handleDepositAmountKeydown, sendCustomMail, initializeMailThread, handleSystemSave, confirmDelete, confirmDeleteMailTemplate, handleMailSave, insertPlaceholder,
         renderPreview, isPreviewMode, togglePreview,
-        loginEmail, isLoggingIn, loginError, showEmailForm, handleGoogleLogin, handleLogin, handleLogout, handleGoToLogin,
+        loginError, googleLoginUrl, handleGoogleLogin, handleLogout, handleGoToLogin,
         BASE_WEBAPP_URL, appVersion, appLogo
       };
     }

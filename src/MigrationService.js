@@ -2,7 +2,7 @@
  * [MigrationService] 데이터베이스(시트) 스키마 점검 및 마이그레이션 관리 (Singleton)
  * - jsog 패턴 기반: SCHEMA 내 name 및 type('TEXT', 'DATE_TIME', 'DATE', 'BOOLEAN', 'DOUBLE', 'CURRENCY') 정의
  * - Sheets Advanced API를 활용한 Native Table 생성 및 기존 시트 누락 컬럼 자동 추가
- * - 수동 실행 전용 (runSchemaMigration() 함수를 통해 관리자가 수동 실행)
+ * - 수동 실행 전용 (runSchemaMigration_() 함수를 통해 관리자가 수동 실행)
  */
 const MigrationService = {
   SCHEMA: {
@@ -234,7 +234,7 @@ const MigrationService = {
 /**
  * [수동 실행용] Apps Script 에디터 드롭다운에서 직접 선택하여 실행할 수 있는 탑레벨 함수
  */
-function runSchemaMigration() {
+function runSchemaMigration_() {
   const result = MigrationService.setup();
   Logger.log(JSON.stringify(result, null, 2));
   return result;
@@ -243,7 +243,7 @@ function runSchemaMigration() {
 /**
  * [수동 실행용] 오늘 이후 중복 예약 백필 실행
  */
-function runDuplicateBackfill() {
+function runDuplicateBackfill_() {
   const result = MigrationService.backfillFutureDuplicateGroups();
   Logger.log(JSON.stringify(result, null, 2));
   return result;

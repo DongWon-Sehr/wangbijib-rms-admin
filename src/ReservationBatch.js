@@ -47,7 +47,7 @@ function processPendingReservation() {
     if (!responseId && branchName) {
       const rowIndex = i + 1; // 실제 시트 행 번호 (1-based)
       try {
-        processSingleReservation(row, rowIndex, resSheet, dbSheet, IDX);
+        processSingleReservation_(row, rowIndex, resSheet, dbSheet, IDX);
         processedCount++;
       } catch (e) {
         console.log(`[Batch] Error at row ${rowIndex}: ${e.message}`);
@@ -60,13 +60,13 @@ function processPendingReservation() {
   }
 
   // [Retry Logic] email_thread_id 누락 건 보정 시도
-  repairMissingThreadIds();
+  repairMissingThreadIds_();
 }
 
 /**
  * [Retry Logic] email_thread_id가 비어있는 최근 예약 건들을 찾아 재검색 및 보정
  */
-function repairMissingThreadIds() {
+function repairMissingThreadIds_() {
   try {
     const reservations = Util.getSheetDataAsObjects(Config.SHEET_NAMES.RESERVATION);
     const now = new Date();
@@ -148,7 +148,7 @@ function repairMissingThreadIds() {
 /**
  * 단일 예약 건 처리 로직
  */
-function processSingleReservation(row, rowIndex, resSheet, dbSheet, idx) {
+function processSingleReservation_(row, rowIndex, resSheet, dbSheet, idx) {
   // 1. 데이터 파싱
   const rawData = {
     branchName: row[idx.BRANCH],

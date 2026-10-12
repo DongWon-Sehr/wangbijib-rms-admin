@@ -79,4 +79,12 @@ clasp push --watch
 ```
 
 ### 3. 배포(Deploy) 관리
-`clasp push` 후 `/dev` 테스트 URL에서 확인합니다. 운영 웹 앱에는 Google Apps Script 콘솔 또는 clasp CLI로 새 버전을 만들고 기존 배포가 그 버전을 가리키도록 갱신해야 반영됩니다.
+`clasp push` 후 테스트용 `/exec` 배포를 갱신하여 로그인까지 확인합니다. 운영 웹 앱에는 Google Apps Script 콘솔 또는 clasp CLI로 새 버전을 만들고 기존 배포가 그 버전을 가리키도록 갱신해야 반영됩니다.
+
+### Google 로그인 설정
+
+이 브랜치의 로그인은 Google OAuth 웹 애플리케이션의 authorization code를 서버에서 교환합니다. `Config.GOOGLE_CLIENT_ID`와 **같은 OAuth 클라이언트**의 client secret을 Apps Script 프로젝트의 **Script Properties**에 `GOOGLE_OAUTH_CLIENT_SECRET` 이름으로 저장해야 합니다. 기존 secret이 노출되지 않았고 확인 가능하다면 재사용할 수 있습니다. 노출되었거나 확인할 수 없을 때만 새 secret을 발급하세요. secret을 소스 코드나 브라우저 코드에 넣지 마세요.
+
+GCP의 Authorized redirect URIs에는 운영 배포의 정확한 `https://script.google.com/macros/s/.../exec` 주소를 등록합니다. 실제 로그인 테스트에는 별도 테스트 배포의 `/exec` 주소를 GCP에 추가해 사용하세요. 서버 세션은 최대 6시간이며 Apps Script 캐시가 조기에 비워지면 다시 로그인해야 합니다.
+
+배포 전에 `node --test tests/auth.test.cjs`를 실행하고, 새 버전으로 운영 배포를 갱신한 뒤 실제 등록 계정과 미등록 계정으로 각각 로그인 결과를 확인하세요. `clasp push`만으로 운영 배포가 바뀌지는 않습니다.
