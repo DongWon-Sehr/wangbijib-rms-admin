@@ -105,6 +105,18 @@ const MigrationService = {
       { name: 'mail_sent_at', type: 'DATE_TIME' },
       { name: 'created_at', type: 'DATE_TIME' },
       { name: 'updated_at', type: 'DATE_TIME' }
+    ],
+    activity_log: [
+      { name: 'id', type: 'TEXT' },
+      { name: 'timestamp', type: 'DATE_TIME' },
+      { name: 'actor_email', type: 'TEXT' },
+      { name: 'actor_name', type: 'TEXT' },
+      { name: 'action', type: 'TEXT' },
+      { name: 'target_type', type: 'TEXT' },
+      { name: 'target_id', type: 'TEXT' },
+      { name: 'target', type: 'TEXT' },
+      { name: 'details', type: 'TEXT' },
+      { name: 'status', type: 'TEXT' }
     ]
   },
 
@@ -196,6 +208,19 @@ const MigrationService = {
       return `[생성] '${sheetName}' 시트 생성 완료 (${columnsConfig.length}개 컬럼)`;
     }
 
+    if (sheetName === 'activity_log') {
+      const lock = LockService.getScriptLock();
+      lock.waitLock(20000);
+      try {
+        const result = ActivityLogService.ensureSheetLayout(sheet);
+        if (result.reordered) return `[열순서] '${sheetName}' 컬럼 순서 정리 완료`;
+        if (result.missing.length) return `[컬럼추가] '${sheetName}' 누락 컬럼 추가: ${result.missing.join(', ')}`;
+        return `[유지] '${sheetName}' 최신 상태`;
+      } finally {
+        lock.releaseLock();
+      }
+    }
+
     const lastCol = sheet.getLastColumn();
     if (lastCol === 0) {
       console.log(`[Migration] Sheet '${sheetName}' is empty. Appending headers.`);
@@ -235,6 +260,11 @@ const MigrationService = {
  * [수동 실행용] Apps Script 에디터 드롭다운에서 직접 선택하여 실행할 수 있는 탑레벨 함수
  */
 function runSchemaMigration() {
+  const activeEmail = String(Session.getActiveUser().getEmail() || '').toLowerCase();
+  const effectiveEmail = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  if (!activeEmail || activeEmail !== effectiveEmail) {
+    throw new Error('Apps Script 에디터에서 본인 계정으로 실행해 주세요.');
+  }
   const result = MigrationService.setup();
   Logger.log(JSON.stringify(result, null, 2));
   return result;
@@ -244,6 +274,11 @@ function runSchemaMigration() {
  * [수동 실행용] 오늘 이후 중복 예약 백필 실행
  */
 function runDuplicateBackfill() {
+  const activeEmail = String(Session.getActiveUser().getEmail() || '').toLowerCase();
+  const effectiveEmail = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  if (!activeEmail || activeEmail !== effectiveEmail) {
+    throw new Error('Apps Script 에디터에서 본인 계정으로 실행해 주세요.');
+  }
   const result = MigrationService.backfillFutureDuplicateGroups();
   Logger.log(JSON.stringify(result, null, 2));
   return result;

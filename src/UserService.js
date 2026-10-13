@@ -1,59 +1,146 @@
-/**
- * [UserService] 사용자 인증 및 권한 관리 (Singleton)
- * - v1.4: 비밀번호 인증 제거 -> 구글 세션 인증으로 변경
- */
+/** Google OAuth 로그인과 서버 세션. Execute as Me 환경에서 UserProperties는 사용자별 저장소가 아니다. */
 const UserService = {
-  /**
-   * [Auth] 현재 접속한 구글 계정의 세션 유효성 검사
-   * - Session.getActiveUser().getEmail() 사용
-   * - user 시트에 등록된 이메일인지 확인
-   * - enabled 상태 확인
-   */
-  checkSession() {
+  SESSION_SECONDS: 7 * 24 * 60 * 60,
+  CACHE_SECONDS: 21600,
+  STATE_SECONDS: 600,
+
+  randomToken() {
+    return Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  },
+
+  sessionKey(token) {
+    const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token);
+    return 'WANG_RMS_AUTH_' + Utilities.base64EncodeWebSafe(digest).replace(/=+$/, '');
+  },
+
+  pruneExpiredSessions(properties) {
+    const now = Date.now();
+    const all = properties.getProperties();
+    Object.keys(all).forEach(key => {
+      if (!key.startsWith('WANG_RMS_AUTH_')) return;
+      try {
+        if (JSON.parse(all[key]).expiresAt > now) return;
+      } catch (_) {}
+      properties.deleteProperty(key);
+    });
+  },
+
+  beginGoogleLogin(redirectUri) {
+    const clientId = Config.GOOGLE_CLIENT_ID;
+    if (!PropertiesService.getScriptProperties().getProperty('GOOGLE_OAUTH_CLIENT_SECRET')) {
+      throw new Error('Script Properties에 GOOGLE_OAUTH_CLIENT_SECRET을 설정해 주세요.');
+    }
+    if (!clientId || !redirectUri || !/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(redirectUri)) {
+      throw new Error('Google 로그인 설정을 확인해 주세요.');
+    }
+    const state = this.randomToken();
+    CacheService.getScriptCache().put('oauth_state_' + state, '1', this.STATE_SECONDS);
+    const params = {
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile',
+      state: state,
+      prompt: 'select_account'
+    };
+    const query = Object.keys(params).map(key => encodeURIComponent(key) + '=' + encodeURIComponent(params[key])).join('&');
+    return { url: 'https://accounts.google.com/o/oauth2/v2/auth?' + query, state: state };
+  },
+
+  completeGoogleLogin(code, state, redirectUri) {
+    if (!code || !state || !/^[a-f0-9]{64}$/.test(state)) throw new Error('잘못된 로그인 응답입니다.');
+    const cache = CacheService.getScriptCache();
+    const stateKey = 'oauth_state_' + state;
+    if (cache.get(stateKey) !== '1') throw new Error('로그인 요청이 만료되었거나 유효하지 않습니다. 다시 시도해 주세요.');
+    cache.remove(stateKey);
+    const secret = PropertiesService.getScriptProperties().getProperty('GOOGLE_OAUTH_CLIENT_SECRET');
+    if (!secret) throw new Error('Google OAuth client secret이 Script Properties에 설정되지 않았습니다.');
+    const response = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+      method: 'post',
+      payload: {
+        code: code,
+        client_id: Config.GOOGLE_CLIENT_ID,
+        client_secret: secret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      },
+      muteHttpExceptions: true
+    });
+    if (response.getResponseCode() !== 200) {
+      console.warn('[OAuth] token exchange failed: ' + response.getResponseCode());
+      throw new Error('Google 인증 코드 검증에 실패했습니다. OAuth 설정을 확인해 주세요.');
+    }
+    const tokens = JSON.parse(response.getContentText());
+    if (!tokens.access_token) throw new Error('Google 인증 토큰이 없습니다.');
+    const profileResponse = UrlFetchApp.fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { Authorization: 'Bearer ' + tokens.access_token },
+      muteHttpExceptions: true
+    });
+    if (profileResponse.getResponseCode() !== 200) throw new Error('Google 계정 확인에 실패했습니다.');
+    const profile = JSON.parse(profileResponse.getContentText());
+    if (!profile.email || profile.email_verified !== true) throw new Error('인증된 Google 이메일을 확인할 수 없습니다.');
+    const user = this.findEnabledUser(profile.email);
+    const sessionToken = this.randomToken();
+    const sessionKey = this.sessionKey(sessionToken);
+    const record = JSON.stringify({ email: String(user.user_email), expiresAt: Date.now() + this.SESSION_SECONDS * 1000 });
+    const properties = PropertiesService.getScriptProperties();
+    this.pruneExpiredSessions(properties);
+    properties.setProperty(sessionKey, record);
+    cache.put(sessionKey, record, this.CACHE_SECONDS);
+    return { token: sessionToken, state: state };
+  },
+
+  findEnabledUser(email) {
+    const users = Util.getSheetDataAsObjects(Config.SHEET_NAMES.USER);
+    const user = users.find(u => String(u.user_email).toLowerCase() === String(email).toLowerCase());
+    if (!user) throw new Error('등록되지 않은 Google 계정입니다: ' + email);
+    if (user.enabled !== true) throw new Error('비활성화된 계정입니다. 관리자에게 문의하세요.');
+    return user;
+  },
+
+  checkSession(token) {
     try {
-      const email = Session.getActiveUser().getEmail();
-      if (!email) {
-        return Util.createResponse(false, null, '구글 계정 정보를 가져올 수 없습니다.');
+      if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) {
+        return Util.createResponse(false, { needLogin: true }, '로그인이 필요합니다.');
       }
-
-      // 모든 사용자 로드 (ORM 방식)
-      const users = Util.getSheetDataAsObjects(Config.SHEET_NAMES.USER);
-      
-      // 이메일 대소문자 무시 비교
-      const user = users.find(u => String(u.user_email).toLowerCase() === email.toLowerCase());
-
-      if (!user) {
-        // 등록되지 않은 사용자
-        return Util.createResponse(false, { email: email }, `등록되지 않은 사용자입니다. (${email})`);
+      const cache = CacheService.getScriptCache();
+      const properties = PropertiesService.getScriptProperties();
+      const key = this.sessionKey(token);
+      const cached = cache.get(key);
+      const saved = cached || properties.getProperty(key);
+      if (!saved) return Util.createResponse(false, { needLogin: true }, '로그인 세션이 만료되었습니다.');
+      let record;
+      try { record = JSON.parse(saved); } catch (_) { record = null; }
+      if (!record || !record.email || !record.expiresAt || record.expiresAt <= Date.now()) {
+        cache.remove(key);
+        properties.deleteProperty(key);
+        return Util.createResponse(false, { needLogin: true }, '로그인 세션이 만료되었습니다.');
       }
-
-      if (!user.enabled) {
-        return Util.createResponse(false, { email: email }, '비활성화된 계정입니다. 관리자에게 문의하세요.');
+      if (!cached) {
+        const remaining = Math.ceil((record.expiresAt - Date.now()) / 1000);
+        cache.put(key, saved, Math.max(1, Math.min(this.CACHE_SECONDS, remaining)));
       }
-
-      // 권한 조회
-      let allowedBranchIds = [];
-      if (user.role === Config.USER_ROLES.ADMIN) {
-        allowedBranchIds = ['all']; // Admin은 프리패스
-      } else {
-        allowedBranchIds = this.fetchUserPermissions(user.id);
-      }
-
-      // 클라이언트에 내려줄 사용자 정보
-      const userInfo = {
+      const user = this.findEnabledUser(record.email);
+      const allowedBranchIds = user.role === Config.USER_ROLES.ADMIN ? ['all'] : this.fetchUserPermissions(user.id);
+      return Util.createResponse(true, {
         id: user.id,
         user_email: user.user_email,
         user_name: user.user_name,
         role: user.role,
         allowedBranchIds: allowedBranchIds
-      };
-
-      return Util.createResponse(true, userInfo);
-
+      });
     } catch (e) {
-      console.log(`[UserService] Session Check Error: ${e.message}`);
-      return Util.createResponse(false, null, `인증 오류: ${e.message}`);
+      return Util.createResponse(false, { needLogin: true }, e.message);
     }
+  },
+
+  logout(token) {
+    if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) {
+      const key = this.sessionKey(token);
+      CacheService.getScriptCache().remove(key);
+      PropertiesService.getScriptProperties().deleteProperty(key);
+    }
+    return Util.createResponse(true, null, '로그아웃 되었습니다.');
   },
 
   /**
@@ -70,7 +157,14 @@ const UserService = {
    * [Admin] 전체 사용자 목록 조회
    */
   getAllUsers() {
-    return Util.getSheetDataAsObjects(Config.SHEET_NAMES.USER);
+    const users = Util.getSheetDataAsObjects(Config.SHEET_NAMES.USER);
+    const permissions = Util.getSheetDataAsObjects(Config.SHEET_NAMES.USER_PERMISSION);
+    return users.map(user => ({
+      ...user,
+      branch_ids: permissions
+        .filter(permission => permission.user_id === user.id && permission.enabled === true)
+        .map(permission => permission.branch_id)
+    }));
   },
 
   /**
