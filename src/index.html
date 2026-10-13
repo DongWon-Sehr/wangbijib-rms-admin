@@ -102,6 +102,11 @@
           <?!= include('ViewSettings'); ?>
         </div>
 
+      <!-- View: Activity Log (Admin Only) -->
+      <div v-if="currentUser && currentUser.role === 'admin'" v-show="currentView === 'activity'" class="h-full flex flex-col">
+        <?!= include('ViewActivityLog'); ?>
+      </div>
+
       </main>
 
       <!-- 3. Modals -->

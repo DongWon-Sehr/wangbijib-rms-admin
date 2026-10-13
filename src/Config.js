@@ -3,7 +3,7 @@
  */
 const Config = {
   // 0. App Version (배포 시 여기를 직접 올림 — UI/탭 타이틀에 자동 반영)
-  APP_VERSION: '2.2.6',
+  APP_VERSION: '2.2.9',
 
   // 0-1. BI 로고 (스크립트 소유 계정 Drive 파일)
   LOGO_FILE_ID: '1Ni3HhXrloRWe_idt2XeroEvcS--n6BK9',
@@ -26,6 +26,7 @@ const Config = {
     SLOT_OVERRIDE: 'slot_override',  // 날짜별 슬롯 재정의 (커스텀 슬롯)
     MAIL_TEMPLATE: 'mail_template',  // 메일 템플릿 관리
     DUPLICATE_GROUP: 'duplicate_group', // 중복 예약 그룹 관리 시트
+    ACTIVITY_LOG: 'activity_log',       // 사용자 작업 내역
   },
 
   // 3. Deposit Policy

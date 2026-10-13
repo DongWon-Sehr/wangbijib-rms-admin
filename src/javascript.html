@@ -208,6 +208,17 @@
 
       // Settings
       const settingsTab = ref('slot');
+      const isSchemaMigrationRunning = ref(false);
+      const activityLogs = ref([]);
+      const activitySearch = ref('');
+      const activityStatus = ref('all');
+      const activityLoading = ref(false);
+      const filteredActivityLogs = computed(() => activityLogs.value.filter(log => {
+        if (activityStatus.value !== 'all' && log.status !== activityStatus.value) return false;
+        const query = activitySearch.value.trim().toLowerCase();
+        return !query || [log.actor_name, log.actor_email, log.action, log.target, log.details]
+          .some(value => String(value || '').toLowerCase().includes(query));
+      }));
       const currentSlotDate = ref(Util.formatDate(new Date(), 'date'));
       const selectedSlotBranchId = ref('');
       const selectedCalendarBranchId = ref('master');
@@ -351,7 +362,7 @@
       const retryableReadApis = new Set([
         'apiGetBranches', 'apiGetReservations', 'apiGetSlotMasters',
         'apiGetSlotDefaults', 'apiGetSlotOverrides', 'apiGetMailTemplates',
-        'apiGetDuplicateGroups', 'apiGetBouncedEmails', 'apiGetUsers'
+        'apiGetDuplicateGroups', 'apiGetBouncedEmails', 'apiGetUsers', 'apiGetActivityLogs'
       ]);
       const runReadGoogleScript = async (funcName, ...args) => {
         if (!retryableReadApis.has(funcName)) throw new Error('조회 API가 아닙니다: ' + funcName);
@@ -1272,16 +1283,52 @@
             runReadGoogleScript('apiGetSlotDefaults'), runReadGoogleScript('apiGetSlotOverrides'), runReadGoogleScript('apiGetMailTemplates'),
             runReadGoogleScript('apiGetDuplicateGroups'), runReadGoogleScript('apiGetBouncedEmails')
           ];
-          if (currentUser.value && currentUser.value.role === 'admin') promises.push(runReadGoogleScript('apiGetUsers'));
+          if (currentUser.value && currentUser.value.role === 'admin') {
+            promises.push(runReadGoogleScript('apiGetUsers'));
+            promises.push(runReadGoogleScript('apiGetActivityLogs'));
+          }
           const results = await Promise.all(promises);
           branches.value = results[0].data || []; reservations.value = results[1].data || []; slotMasters.value = results[2].data || [];
           slotDefaults.value = results[3].data || []; slotOverrides.value = results[4].data || []; mailTemplates.value = results[5].data || [];
           duplicateGroupsData.value = results[6]?.data || [];
           bouncedEmailsData.value = results[7]?.data || [];
-          if (currentUser.value.role === 'admin' && results[8]) users.value = results[8].data || [];
+          if (currentUser.value.role === 'admin') {
+            users.value = results[8]?.data || [];
+            activityLogs.value = results[9]?.data || [];
+          }
           return true;
         } catch (e) { console.error(e); if (!silent) await showCustomAlert('오류', '데이터 갱신 실패: ' + e.message); return false; }
         finally { if (!silent) isLoading.value = false; }
+      };
+
+      const refreshActivityLogs = async () => {
+        if (activityLoading.value || !currentUser.value || currentUser.value.role !== 'admin') return;
+        activityLoading.value = true;
+        try {
+          const result = await runReadGoogleScript('apiGetActivityLogs');
+          activityLogs.value = result.data || [];
+        } catch (err) {
+          await showCustomAlert('오류', '작업 내역을 불러오지 못했습니다: ' + err.message);
+        } finally {
+          activityLoading.value = false;
+        }
+      };
+
+      const runSchemaMigrationFromSettings = async () => {
+        if (isSchemaMigrationRunning.value || !currentUser.value || currentUser.value.role !== 'admin') return;
+        const confirmed = await showCustomConfirm('시트 구조 점검', '누락된 시트와 컬럼을 확인하고 추가할까요?');
+        if (!confirmed) return;
+        isSchemaMigrationRunning.value = true;
+        try {
+          const response = await runGoogleScriptSilent('apiRunSchemaMigration');
+          const changes = (response.data.results || []).filter(item => !item.startsWith('[유지]'));
+          await showCustomAlert('점검 완료', changes.length ? changes.join('\n') : '모든 시트와 컬럼이 이미 준비되어 있습니다.');
+          await refreshActivityLogs();
+        } catch (err) {
+          await showCustomAlert('점검 실패', err.message);
+        } finally {
+          isSchemaMigrationRunning.value = false;
+        }
       };
 
       // 예약금 금액: 콤마 자동 포맷 (숫자만 입력, 콤마 삽입/제거 시 커서 위치 보존)
@@ -2603,10 +2650,11 @@
         isProfileDropdownOpen, isNotificationOpen, isMutating, isMobileMenuOpen, logoutUrl, refundOrderUrl, refundTarget, modalState, alertModal,
         activeReservation, activeSystemData,
         reservations, branches, users, mailTemplates, duplicateGroupsData, slotMasters, slotDefaults, slotOverrides,
+        activityLogs, activitySearch, activityStatus, activityLoading, filteredActivityLogs, refreshActivityLogs,
         filterText, filterStatus, filterDeposit, filterBranchIds, filterDateType, filterDateStart, filterDateEnd,
         filterIssueType, selectedReservationIds,
         sortKey, sortOrder, currentPage, itemsPerPage,
-        settingsTab, currentSlotDate, selectedSlotBranchId, selectedCalendarBranchId,
+        settingsTab, isSchemaMigrationRunning, runSchemaMigrationFromSettings, currentSlotDate, selectedSlotBranchId, selectedCalendarBranchId,
         filteredReservations, paginatedReservations, totalPage, branchMapKo, branchMapEn, filterableBranches, slotSettingsBranches, filteredSlotBranches,
         activeCalendarId, calendarIframeSrc, slotMasterMap,
         notifications, notificationCount,

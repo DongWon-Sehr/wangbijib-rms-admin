@@ -2,7 +2,7 @@
  * [MigrationService] 데이터베이스(시트) 스키마 점검 및 마이그레이션 관리 (Singleton)
  * - jsog 패턴 기반: SCHEMA 내 name 및 type('TEXT', 'DATE_TIME', 'DATE', 'BOOLEAN', 'DOUBLE', 'CURRENCY') 정의
  * - Sheets Advanced API를 활용한 Native Table 생성 및 기존 시트 누락 컬럼 자동 추가
- * - 수동 실행 전용 (runSchemaMigration_() 함수를 통해 관리자가 수동 실행)
+ * - Apps Script 에디터의 runSchemaMigration 또는 관리자 설정 화면에서 실행
  */
 const MigrationService = {
   SCHEMA: {
@@ -105,6 +105,16 @@ const MigrationService = {
       { name: 'mail_sent_at', type: 'DATE_TIME' },
       { name: 'created_at', type: 'DATE_TIME' },
       { name: 'updated_at', type: 'DATE_TIME' }
+    ],
+    activity_log: [
+      { name: 'id', type: 'TEXT' },
+      { name: 'timestamp', type: 'DATE_TIME' },
+      { name: 'actor_email', type: 'TEXT' },
+      { name: 'actor_name', type: 'TEXT' },
+      { name: 'action', type: 'TEXT' },
+      { name: 'target', type: 'TEXT' },
+      { name: 'details', type: 'TEXT' },
+      { name: 'status', type: 'TEXT' }
     ]
   },
 
@@ -231,10 +241,13 @@ const MigrationService = {
   }
 };
 
-/**
- * [수동 실행용] Apps Script 에디터 드롭다운에서 직접 선택하여 실행할 수 있는 탑레벨 함수
- */
-function runSchemaMigration_() {
+/** Apps Script 에디터에서 직접 실행할 수 있는 전체 스키마 점검 함수. */
+function runSchemaMigration() {
+  const activeEmail = String(Session.getActiveUser().getEmail() || '').toLowerCase();
+  const effectiveEmail = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  if (!activeEmail || activeEmail !== effectiveEmail) {
+    throw new Error('Apps Script 에디터에서 본인 계정으로 실행해 주세요.');
+  }
   const result = MigrationService.setup();
   Logger.log(JSON.stringify(result, null, 2));
   return result;

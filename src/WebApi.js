@@ -101,7 +101,7 @@ function _getLogoDataUri() {
  * [Wrapper] API 실행 및 에러 핸들링 래퍼
  * - [v2.0] params 인자 추가로 요청 데이터 로깅 지원
  */
-function _executeApi(apiName, action, params = null) {
+function _executeApi(apiName, action, params = null, actor = null) {
   const startTime = new Date().getTime();
   
   // 파라미터 로깅
@@ -121,16 +121,26 @@ function _executeApi(apiName, action, params = null) {
     const duration = new Date().getTime() - startTime;
     console.log(`✅ [API End] ${apiName} (${duration}ms)`);
     
-    if (result && typeof result.success === 'boolean') {
-      return result;
-    }
-    return Util.createResponse(true, result);
+    const response = result && typeof result.success === 'boolean' ? result : Util.createResponse(true, result);
+    if (actor) _recordActivity(apiName, actor, params, response.success);
+    return response;
   } catch (err) {
     const duration = new Date().getTime() - startTime;
     console.log(`🔥 [API Error] ${apiName} (${duration}ms) | Params: ${paramLog} | Error: ${err.message}`);
     if (err.stack) console.log(err.stack);
 
+    if (actor) _recordActivity(apiName, actor, params, false);
+
     return Util.createResponse(false, null, err.message);
+  }
+}
+
+function _recordActivity(apiName, actor, params, success) {
+  try {
+    ActivityLogService.record(apiName, actor, params, success);
+  } catch (err) {
+    // 작업 자체는 이미 끝났을 수 있으므로 중복 실행을 유도하는 실패 응답을 반환하지 않는다.
+    console.error('[ActivityLog] 기록 실패: ' + err.message);
   }
 }
 
@@ -205,6 +215,13 @@ function apiGetUsers(token) {
   });
 }
 
+function apiGetActivityLogs(token) {
+  const auth = UserService.checkSession(token);
+  if (!auth.success) return auth;
+  if (auth.data.role !== Config.USER_ROLES.ADMIN) return Util.createResponse(false, null, '관리자 권한이 필요합니다.');
+  return _executeApi('apiGetActivityLogs', () => ActivityLogService.getRecentLogs(200));
+}
+
 /**
  * [Data] 슬롯 마스터 조회
  */
@@ -266,7 +283,7 @@ function apiUpdateReservation(token, data) {
     const { id, ...updateData } = data;
     if (!id) throw new Error("Reservation ID is missing");
     return ReservationService.updateReservation(id, updateData);
-  }, data);
+  }, data, auth.data);
 }
 
 function apiUpdateReservationMessageSentAt(token, id) {
@@ -275,19 +292,19 @@ function apiUpdateReservationMessageSentAt(token, id) {
   // [Modified] id와 나머지 데이터를 분리하여 서비스 호출
   return _executeApi('apiUpdateReservationMessageSentAt', () => {
     return ReservationService.updateMessageSentAt(id);
-  }, id);
+  }, { id }, auth.data);
 }
 
 function apiUpdateReservationStatus(token, id, status) {
   const auth = UserService.checkSession(token);
   if (!auth.success) return auth;
-  return _executeApi('apiUpdateReservationStatus', () => ReservationService.updateReservationStatus(id, status), { id, status });
+  return _executeApi('apiUpdateReservationStatus', () => ReservationService.updateReservationStatus(id, status), { id, status }, auth.data);
 }
 
 function apiUpdateDepositStatus(token, id, status) {
   const auth = UserService.checkSession(token);
   if (!auth.success) return auth;
-  return _executeApi('apiUpdateDepositStatus', () => ReservationService.updateDepositStatus(id, status), { id, status });
+  return _executeApi('apiUpdateDepositStatus', () => ReservationService.updateDepositStatus(id, status), { id, status }, auth.data);
 }
 
 /**
@@ -321,7 +338,7 @@ function apiSendTemplatedMail(token, payload) {
     }
 
     return GmailService.replyToThreadWithTemplate(threadId, templateId, data);
-  }, payload);
+  }, payload, auth.data);
 }
 
 /**
@@ -344,7 +361,7 @@ function apiInitializeMailThread(token, payload) {
     ReservationService.updateReservation(reservationId, updateFields);
     
     return { threadId: threadId, email: data ? data.email : undefined };
-  }, payload);
+  }, payload, auth.data);
 }
 
 /**
@@ -377,7 +394,7 @@ function apiCorrectEmailAndInitializeThread(token, payload) {
     ReservationService.updateReservation(reservationId, { email_thread_id: threadId });
 
     return { threadId: threadId, email: newEmail };
-  }, payload);
+  }, payload, auth.data);
 }
 
 /**
@@ -402,7 +419,7 @@ function apiAddLabelsToThread(token, payload) {
     }
     GmailService.addLabelsAfterDelay(threadId, pax, status, deposit_status);
     return true;
-  }, payload);
+  }, payload, auth.data);
 }
 
 /**
@@ -413,7 +430,7 @@ function apiMarkReservationAsRead(token, id) {
   if (!auth.success) return auth;
   return _executeApi('apiMarkReservationAsRead', () => {
     return ReservationService.markAsRead(id);
-  }, { id });
+  }, { id }, auth.data);
 }
 
 function apiSaveSystemSettings(token, type, data) {
@@ -446,7 +463,7 @@ function apiSaveSystemSettings(token, type, data) {
       default:
         throw new Error(`Unknown setting type: ${type}`);
     }
-  }, { type, data });
+  }, { type, data }, auth.data);
 }
 
 function apiDeleteSystemData(token, type, id) {
@@ -465,7 +482,7 @@ function apiDeleteSystemData(token, type, id) {
       default:
         return Util.createResponse(false, null, "Unsupported delete type");
     }
-  }, { type, id });
+  }, { type, id }, auth.data);
 }
 
 // ==========================================
@@ -487,7 +504,7 @@ function apiCreateManualDuplicateGroup(token, params) {
   return _executeApi('apiCreateManualDuplicateGroup', () => {
     UserService.checkSession(token);
     return DuplicateGroupService.createManualGroup(params.reservationIds, params.earliestDate);
-  }, params);
+  }, params, auth.data);
 }
 
 function apiClearDuplicateGroup(token, params) {
@@ -496,7 +513,7 @@ function apiClearDuplicateGroup(token, params) {
   return _executeApi('apiClearDuplicateGroup', () => {
     UserService.checkSession(token);
     return DuplicateGroupService.clearGroup(params.groupId, params.reservationIds, params.earliestDate);
-  }, params);
+  }, params, auth.data);
 }
 
 function apiRemoveManualDuplicateGroup(token, params) {
@@ -505,7 +522,7 @@ function apiRemoveManualDuplicateGroup(token, params) {
   return _executeApi('apiRemoveManualDuplicateGroup', () => {
     UserService.checkSession(token);
     return DuplicateGroupService.removeManualGroup(params.groupId);
-  }, params);
+  }, params, auth.data);
 }
 
 function apiExcludeReservationFromGroup(token, params) {
@@ -514,7 +531,7 @@ function apiExcludeReservationFromGroup(token, params) {
   return _executeApi('apiExcludeReservationFromGroup', () => {
     UserService.checkSession(token);
     return DuplicateGroupService.excludeReservationFromGroup(params.groupId, params.reservationId);
-  }, params);
+  }, params, auth.data);
 }
 
 function apiMarkDuplicateMailSent(token, params) {
@@ -523,7 +540,7 @@ function apiMarkDuplicateMailSent(token, params) {
   return _executeApi('apiMarkDuplicateMailSent', () => {
     UserService.checkSession(token);
     return DuplicateGroupService.markDuplicateMailSent(params.groupId, params.reservationIds);
-  }, params);
+  }, params, auth.data);
 }
 
 function apiSendDuplicateConfirmationMail(token, params) {
@@ -556,7 +573,7 @@ function apiSendDuplicateConfirmationMail(token, params) {
     }
 
     return Util.createResponse(true, { threadId: threadId, mail_sent_at: mailSentAt }, '중복 확인 메일이 발송되었습니다.');
-  }, params);
+  }, params, auth.data);
 }
 
 function apiRunSchemaMigration(token) {
@@ -566,8 +583,9 @@ function apiRunSchemaMigration(token) {
     const session = UserService.checkSession(token);
     if (!session.success) throw new Error(session.message);
     if (session.data.role !== Config.USER_ROLES.ADMIN) throw new Error('관리자 권한이 필요합니다.');
-    return MigrationService.setup();
-  });
+    const result = MigrationService.setup();
+    return Util.createResponse(result.success, result);
+  }, null, auth.data);
 }
 
 function apiBackfillDuplicateGroups(token) {
@@ -578,7 +596,7 @@ function apiBackfillDuplicateGroups(token) {
     if (!session.success) throw new Error(session.message);
     if (session.data.role !== Config.USER_ROLES.ADMIN) throw new Error('관리자 권한이 필요합니다.');
     return MigrationService.backfillFutureDuplicateGroups();
-  });
+  }, null, auth.data);
 }
 
 function apiGetBouncedEmails(token) {
