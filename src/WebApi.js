@@ -53,6 +53,7 @@ function doPost(e) {
       }
       
       console.log(`[Webhook] 예약(${reservationId}) 전송일시 업데이트 완료: ${now}`);
+      _recordActivity('webhookMessageSentAt', { user_email: '', user_name: 'SYSTEM' }, { id: reservationId }, true);
     }
 
     // 4. 응답
@@ -122,7 +123,7 @@ function _executeApi(apiName, action, params = null, actor = null) {
     console.log(`✅ [API End] ${apiName} (${duration}ms)`);
     
     const response = result && typeof result.success === 'boolean' ? result : Util.createResponse(true, result);
-    if (actor) _recordActivity(apiName, actor, params, response.success);
+    if (actor) _recordActivity(apiName, actor, params, response.success, response.success ? response.data : null);
     return response;
   } catch (err) {
     const duration = new Date().getTime() - startTime;
@@ -135,9 +136,9 @@ function _executeApi(apiName, action, params = null, actor = null) {
   }
 }
 
-function _recordActivity(apiName, actor, params, success) {
+function _recordActivity(apiName, actor, params, success, resultData = null) {
   try {
-    ActivityLogService.record(apiName, actor, params, success);
+    ActivityLogService.record(apiName, actor, params, success, resultData);
   } catch (err) {
     // 작업 자체는 이미 끝났을 수 있으므로 중복 실행을 유도하는 실패 응답을 반환하지 않는다.
     console.error('[ActivityLog] 기록 실패: ' + err.message);
@@ -583,8 +584,7 @@ function apiRunSchemaMigration(token) {
     const session = UserService.checkSession(token);
     if (!session.success) throw new Error(session.message);
     if (session.data.role !== Config.USER_ROLES.ADMIN) throw new Error('관리자 권한이 필요합니다.');
-    const result = MigrationService.setup();
-    return Util.createResponse(result.success, result);
+    return MigrationService.setup();
   }, null, auth.data);
 }
 

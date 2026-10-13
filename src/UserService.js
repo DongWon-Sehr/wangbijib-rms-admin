@@ -157,7 +157,14 @@ const UserService = {
    * [Admin] 전체 사용자 목록 조회
    */
   getAllUsers() {
-    return Util.getSheetDataAsObjects(Config.SHEET_NAMES.USER);
+    const users = Util.getSheetDataAsObjects(Config.SHEET_NAMES.USER);
+    const permissions = Util.getSheetDataAsObjects(Config.SHEET_NAMES.USER_PERMISSION);
+    return users.map(user => ({
+      ...user,
+      branch_ids: permissions
+        .filter(permission => permission.user_id === user.id && permission.enabled === true)
+        .map(permission => permission.branch_id)
+    }));
   },
 
   /**

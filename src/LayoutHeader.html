@@ -232,7 +232,7 @@
           :class="{ 'bg-white text-primary-900 shadow-sm': currentView === 'activity', 'text-primary-100 hover:bg-primary-700/50 hover:text-white': currentView !== 'activity' }"
           class="px-4 py-1.5 rounded-md transition-all duration-200 flex items-center text-sm font-bold"
         >
-          <i class="ph ph-clock-counter-clockwise mr-1.5 text-lg"></i> 작업 내역
+          <i class="ph ph-clock-counter-clockwise mr-1.5 text-lg"></i> 시스템 로그
         </button>
       </nav>
 
@@ -399,7 +399,7 @@
                        :class="currentView === 'activity' ? 'bg-white text-primary-600 shadow-sm' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'">
                       <i class="ph ph-clock-counter-clockwise text-xl"></i>
                   </div>
-                  <span class="text-base">작업 내역</span>
+                  <span class="text-base">시스템 로그</span>
                   <i v-if="currentView === 'activity'" class="ph ph-check-circle ml-auto text-primary-600"></i>
               </button>
         </div>

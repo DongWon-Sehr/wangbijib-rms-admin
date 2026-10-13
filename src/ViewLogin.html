@@ -29,10 +29,13 @@
     <!-- 1. Main Action: Official Google Login Button -->
     <div class="space-y-4">
       <a
-        :href="googleLoginUrl || undefined"
+        :href="googleLoginUrl || null"
+        :aria-disabled="!googleLoginUrl"
+        :tabindex="googleLoginUrl ? 0 : -1"
         target="_top"
         @click="handleGoogleLogin"
-        class="w-full py-3.5 px-4 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-bold rounded-2xl border border-gray-300 shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-3 group relative overflow-hidden"
+        class="w-full py-3.5 px-4 bg-white text-gray-700 font-bold rounded-2xl border border-gray-300 shadow-md transition-all duration-200 flex items-center justify-center gap-3 group relative overflow-hidden"
+        :class="googleLoginUrl ? 'hover:bg-gray-50 active:bg-gray-100 hover:shadow-lg cursor-pointer' : 'opacity-50 cursor-not-allowed pointer-events-none'"
       >
         <!-- Google 4-Color 'G' Icon SVG -->
         <svg class="w-5 h-5 flex-shrink-0 group-hover:scale-105 transition-transform" viewBox="0 0 24 24">
@@ -43,10 +46,12 @@
         </svg>
 
         <span class="text-sm font-semibold text-gray-800">
-          {{ googleLoginUrl ? 'Google 계정으로 로그인' : '로그인 준비 중...' }}
+          Google 계정으로 로그인
         </span>
       </a>
     </div>
+
+    <p class="mt-5 text-xs text-gray-500">사용자 등록은 관리자에게 문의하세요.</p>
 
     <!-- Security Note -->
     <div class="mt-8 pt-5 border-t border-gray-100 text-center">

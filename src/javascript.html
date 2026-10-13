@@ -216,7 +216,7 @@
       const filteredActivityLogs = computed(() => activityLogs.value.filter(log => {
         if (activityStatus.value !== 'all' && log.status !== activityStatus.value) return false;
         const query = activitySearch.value.trim().toLowerCase();
-        return !query || [log.actor_name, log.actor_email, log.action, log.target, log.details]
+        return !query || [log.actor_name, log.actor_email, log.action, log.target, log.target_id, log.details]
           .some(value => String(value || '').toLowerCase().includes(query));
       }));
       const currentSlotDate = ref(Util.formatDate(new Date(), 'date'));
@@ -1308,7 +1308,7 @@
           const result = await runReadGoogleScript('apiGetActivityLogs');
           activityLogs.value = result.data || [];
         } catch (err) {
-          await showCustomAlert('오류', '작업 내역을 불러오지 못했습니다: ' + err.message);
+          await showCustomAlert('오류', '시스템 로그를 불러오지 못했습니다: ' + err.message);
         } finally {
           activityLoading.value = false;
         }
@@ -1321,7 +1321,7 @@
         isSchemaMigrationRunning.value = true;
         try {
           const response = await runGoogleScriptSilent('apiRunSchemaMigration');
-          const changes = (response.data.results || []).filter(item => !item.startsWith('[유지]'));
+          const changes = (response.results || []).filter(item => !item.startsWith('[유지]'));
           await showCustomAlert('점검 완료', changes.length ? changes.join('\n') : '모든 시트와 컬럼이 이미 준비되어 있습니다.');
           await refreshActivityLogs();
         } catch (err) {
@@ -1488,6 +1488,7 @@
             isModalLoading.value = true;
             const branch = branches.value.find(b => b.id === activeReservation.value.branch_id) || {};
             const payload = {
+              reservationId: activeReservation.value.id,
               threadId: activeReservation.value.email_thread_id,
               templateId: tmpl.id,
               altBranchId: selectedTemplateNeedsAltBranch.value ? selectedAltBranchId.value : null,
@@ -2430,10 +2431,7 @@
       };
 
       const handleGoogleLogin = (event) => {
-        if (!googleLoginUrl.value) {
-          event.preventDefault();
-          prepareGoogleLogin();
-        }
+        if (!googleLoginUrl.value) event.preventDefault();
       };
 
       const handleLogout = async () => {

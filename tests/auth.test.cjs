@@ -58,6 +58,23 @@ test('anonymous and email-shaped values cannot read protected API', () => {
   assert.equal(vm.runInContext('apiUpdateReservation("admin@example.com", {id:"x"})', context).success, false);
 });
 
+test('admin user list includes saved branch permissions for edit checkboxes', () => {
+  const { context } = setup();
+  context.Config.SHEET_NAMES.USER_PERMISSION = 'user_branch_permission';
+  vm.runInContext('UserService.checkSession = () => ({ success: true, data: { role: "admin" } });', context);
+  context.Util.getSheetDataAsObjects = sheetName => sheetName === 'user'
+    ? [{ id: 'manager-1', user_email: 'manager@example.com', role: 'manager' }]
+    : [
+        { user_id: 'manager-1', branch_id: 'branch-1', enabled: true },
+        { user_id: 'manager-1', branch_id: 'branch-2', enabled: true },
+        { user_id: 'manager-1', branch_id: 'branch-3', enabled: false },
+        { user_id: 'manager-2', branch_id: 'branch-4', enabled: true }
+      ];
+  const result = vm.runInContext('apiGetUsers("token")', context);
+  assert.equal(result.success, true);
+  assert.deepEqual([...result.data[0].branch_ids], ['branch-1', 'branch-2']);
+});
+
 test('OAuth code exchange issues a session only for a verified registered user', () => {
   const { context, calls } = setup();
   const begin = vm.runInContext('UserService.beginGoogleLogin(ScriptApp.getService().getUrl())', context);
