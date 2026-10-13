@@ -226,6 +226,14 @@
         >
           <i class="ph ph-gear-six mr-1.5 text-lg"></i> 설정
         </button>
+        <button
+          v-if="currentUser && currentUser.role === 'admin'"
+          @click="setCurrentView('activity'); refreshActivityLogs()"
+          :class="{ 'bg-white text-primary-900 shadow-sm': currentView === 'activity', 'text-primary-100 hover:bg-primary-700/50 hover:text-white': currentView !== 'activity' }"
+          class="px-4 py-1.5 rounded-md transition-all duration-200 flex items-center text-sm font-bold"
+        >
+          <i class="ph ph-clock-counter-clockwise mr-1.5 text-lg"></i> 시스템 로그
+        </button>
       </nav>
 
       <!-- User Profile (Desktop Clickable) -->
@@ -279,11 +287,11 @@
 
             <!-- Actions -->
             <div class="p-2">
-              <a :href="logoutUrl"
-                class="flex items-center w-full px-4 py-3 text-sm font-medium text-red-600 rounded-lg hover:bg-red-50 transition group">
+              <button @click="handleLogout"
+                class="flex items-center w-full px-4 py-3 text-sm font-medium text-red-600 rounded-lg hover:bg-red-50 transition group text-left">
                 <i class="ph ph-sign-out text-lg mr-3 group-hover:scale-110 transition-transform"></i>
                 로그아웃
-              </a>
+              </button>
             </div>
           </div>
         </transition>
@@ -381,14 +389,27 @@
                   <span class="text-base">시스템 설정</span>
                   <i v-if="currentView === 'settings'" class="ph ph-check-circle ml-auto text-primary-600"></i>
               </button>
+          <button
+                  v-if="currentUser && currentUser.role === 'admin'"
+                  @click="setCurrentViewAndCloseMenu('activity'); refreshActivityLogs()"
+                  class="w-full flex items-center px-4 py-3 rounded-xl transition-all duration-200 group"
+                  :class="{ 'bg-primary-50 text-primary-800 font-bold': currentView === 'activity', 'text-gray-600 hover:bg-gray-100': currentView !== 'activity' }"
+              >
+                  <div class="w-10 h-10 rounded-full flex items-center justify-center mr-3 transition-colors"
+                       :class="currentView === 'activity' ? 'bg-white text-primary-600 shadow-sm' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'">
+                      <i class="ph ph-clock-counter-clockwise text-xl"></i>
+                  </div>
+                  <span class="text-base">시스템 로그</span>
+                  <i v-if="currentView === 'activity'" class="ph ph-check-circle ml-auto text-primary-600"></i>
+              </button>
         </div>
 
         <!-- Drawer Footer -->
         <div class="p-4 border-t border-gray-100 bg-gray-50">
-          <a :href="logoutUrl"
+          <button @click="handleLogout"
             class="flex items-center justify-center w-full px-4 py-3 border border-red-200 text-red-700 font-bold rounded-xl hover:bg-red-50 transition shadow-sm">
             <i class="ph ph-sign-out text-xl mr-2"></i> 로그아웃
-          </a>
+          </button>
         </div>
       </nav>
     </div>

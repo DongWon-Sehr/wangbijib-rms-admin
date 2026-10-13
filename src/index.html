@@ -44,7 +44,6 @@
     xintegrity="sha384-tJkjbtDbvoxO+diRuDtwRO9JXR7pjWnfjfRn5ePUpl7e7RJCxKCwwnfqUAdXh53p" crossorigin="anonymous">
   </script>
 
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
 
   <!-- 2. Styles -->
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -69,8 +68,13 @@
       <p class="text-lg font-bold text-gray-700 animate-pulse">{{ loadingMessage }}</p>
     </div>
 
-    <!-- B. Access Denied Screen (Component) -->
-    <div v-if="appState === 'denied'" class="h-full">
+    <!-- B-1. Login Screen (Component) -->
+    <div v-if="appState === 'login'" class="h-full">
+      <?!= include('ViewLogin'); ?>
+    </div>
+
+    <!-- B-2. Access Denied Screen (Component) -->
+    <div v-else-if="appState === 'denied'" class="h-full">
       <?!= include('ViewDenied'); ?>
     </div>
 
@@ -97,6 +101,11 @@
         <div v-show="currentView === 'settings'" class="h-full flex flex-col">
           <?!= include('ViewSettings'); ?>
         </div>
+
+      <!-- View: Activity Log (Admin Only) -->
+      <div v-if="currentUser && currentUser.role === 'admin'" v-show="currentView === 'activity'" class="h-full flex flex-col">
+        <?!= include('ViewActivityLog'); ?>
+      </div>
 
       </main>
 
@@ -155,16 +164,10 @@
       </div>
     </transition>
 
-    <!-- Google One Tap Configuration (Placed outside v-if chain) -->
-    <div
-      id="g_id_onload"
-      data-client_id="25112068693-uq5e9eugragj3bpohef0qmh0m0vuifi0.apps.googleusercontent.com"
-      data-callback="handleGoogleCredential"
-      data-auto_prompt="true">
-    </div>
 
   </div>
 
+  <script>window.WANG_OAUTH_RESULT = <?!= OAUTH_RESULT_JSON ?>;</script>
   <!-- Core Logic -->
   <?!= include('javascript'); ?>
 </body>
