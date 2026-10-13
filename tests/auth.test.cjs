@@ -140,3 +140,153 @@ test('all public data API entry points check the session', () => {
     assert.match(body.slice(0, 120), /UserService\.checkSession\(token\)/, name);
   }
 });
+
+function setupBrowserAuth({ callback = null, oauthState = null } = {}) {
+  const savedToken = 'a'.repeat(64);
+  const localValues = new Map([
+    ['WANG_RMS_SESSION_TOKEN', savedToken],
+    ['WANG_RMS_SESSION_EMAIL', 'legacy@example.com'],
+    ['other_app_key', 'keep']
+  ]);
+  const sessionValues = new Map([['other_app_key', 'keep']]);
+  if (oauthState) sessionValues.set('WANG_RMS_OAUTH_STATE', oauthState);
+  const storage = values => ({
+    get length() { return values.size; },
+    key: index => [...values.keys()][index] ?? null,
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: key => values.delete(key)
+  });
+  const calls = [];
+  const errors = [];
+  const mounted = [];
+  const responses = {
+    apiCheckSession: { success: true, data: { role: 'admin', allowedBranchIds: ['all'] } },
+    apiBeginGoogleLogin: { success: true, data: { state: 'new-state', url: 'https://accounts.google.com/login' } },
+    apiGetActivityLogs: { success: true, data: { rows: [], nextOffset: null, targetTypes: [] } }
+  };
+  let state;
+  const context = {
+    console: { log() {}, warn() {}, error: error => errors.push(error) },
+    localStorage: storage(localValues),
+    sessionStorage: storage(sessionValues),
+    navigator: { userAgent: 'iPhone', maxTouchPoints: 1 },
+    document: { getElementById: () => ({ dataset: {} }), addEventListener() {} },
+    window: { WANG_OAUTH_RESULT: callback, addEventListener() {} },
+    alert: message => errors.push(message),
+    setInterval: () => 1,
+    clearInterval() {},
+    setTimeout: () => 1,
+    clearTimeout() {},
+    Vue: {
+      ref: value => ({ value }),
+      reactive: value => value,
+      computed: getter => ({ get value() { return typeof getter === 'function' ? getter() : getter.get(); } }),
+      watch() {},
+      onMounted: hook => mounted.push(hook),
+      onUnmounted() {},
+      nextTick: callback => Promise.resolve().then(() => callback?.()),
+      createApp: options => ({ directive() {}, mount: () => { state = options.setup(); } })
+    },
+    google: { script: {
+      history: { replace() {} },
+      get run() {
+        let success;
+        let failure;
+        const runner = new Proxy({}, {
+          get(_, name) {
+            if (name === 'withSuccessHandler') return handler => { success = handler; return runner; };
+            if (name === 'withFailureHandler') return handler => { failure = handler; return runner; };
+            return (...args) => {
+              calls.push({ name, args });
+              const response = Object.hasOwn(responses, name) ? responses[name] : { success: true, data: [] };
+              queueMicrotask(() => response instanceof Error ? failure(response) : success(response));
+            };
+          }
+        });
+        return runner;
+      }
+    } }
+  };
+  vm.createContext(context);
+  const source = fs.readFileSync('src/javascript.html', 'utf8').replace(/^<script>\s*/, '').replace(/<\/script>\s*$/, '');
+  vm.runInContext(source, context);
+  return {
+    state, savedToken, localValues, sessionValues, calls, responses, errors,
+    async start() {
+      mounted.forEach(hook => hook());
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(errors, []);
+    }
+  };
+}
+
+test('browser session survives failed initial checks while protected content stays hidden', async t => {
+  for (const [name, response] of [
+    ['RPC error', new Error('Temporary network failure')],
+    ['empty response', null],
+    ['expired or rejected session', { success: false, data: { needLogin: true }, message: '세션이 만료되었습니다.' }]
+  ]) {
+    await t.test(name, async () => {
+      const browser = setupBrowserAuth();
+      browser.responses.apiCheckSession = response;
+      await browser.start();
+      assert.equal(browser.localValues.get('WANG_RMS_SESSION_TOKEN'), browser.savedToken);
+      assert.equal(browser.state.appState.value, 'login');
+      assert.equal(browser.state.currentUser.value, null);
+      assert.equal(browser.calls.some(call => call.name === 'apiLogout' || call.name === 'apiGetReservations'), false);
+    });
+  }
+});
+
+test('failed or mismatched OAuth callbacks preserve and verify the saved session', async t => {
+  for (const callback of [
+    { error: '이미 사용한 인증 코드입니다.', state: 'expected' },
+    { token: 'b'.repeat(64), state: 'unexpected' }
+  ]) {
+    await t.test(callback.error ? 'OAuth error' : 'state mismatch', async () => {
+      const browser = setupBrowserAuth({ callback, oauthState: 'expected' });
+      await browser.start();
+      assert.equal(browser.localValues.get('WANG_RMS_SESSION_TOKEN'), browser.savedToken);
+      assert.equal(browser.calls.find(call => call.name === 'apiCheckSession').args[0], browser.savedToken);
+      assert.equal(browser.sessionValues.has('WANG_RMS_OAUTH_STATE'), false);
+      assert.equal(browser.state.appState.value, 'authorized');
+    });
+  }
+});
+
+test('valid OAuth callback replaces the saved token and checks the new session', async () => {
+  const token = 'b'.repeat(64);
+  const browser = setupBrowserAuth({ callback: { token, state: 'expected' }, oauthState: 'expected' });
+  await browser.start();
+  assert.equal(browser.localValues.get('WANG_RMS_SESSION_TOKEN'), token);
+  assert.equal(browser.calls.find(call => call.name === 'apiCheckSession').args[0], token);
+  assert.equal(browser.state.appState.value, 'authorized');
+});
+
+test('failed session check after saving a user returns to login without logging out', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.responses.apiCheckSession = new Error('Temporary network failure');
+  browser.state.activeSystemData.value = { type: 'user', mode: 'edit' };
+  browser.state.localData.value = { id: 'user-1' };
+  await browser.state.handleSystemSave();
+  assert.equal(browser.localValues.get('WANG_RMS_SESSION_TOKEN'), browser.savedToken);
+  assert.equal(browser.state.appState.value, 'login');
+  assert.equal(browser.state.currentUser.value, null);
+  assert.equal(browser.calls.some(call => call.name === 'apiLogout'), false);
+});
+
+test('explicit logout revokes the session and clears only the app browser storage', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  assert.equal(browser.localValues.has('WANG_RMS_SESSION_EMAIL'), true);
+  await browser.state.handleLogout();
+  assert.equal(browser.localValues.has('WANG_RMS_SESSION_TOKEN'), false);
+  assert.equal(browser.localValues.has('WANG_RMS_SESSION_EMAIL'), false);
+  assert.equal(browser.localValues.get('other_app_key'), 'keep');
+  assert.equal(browser.sessionValues.get('other_app_key'), 'keep');
+  assert.equal(browser.state.appState.value, 'login');
+  assert.equal(browser.state.currentUser.value, null);
+  assert.equal(browser.calls.find(call => call.name === 'apiLogout').args[0], browser.savedToken);
+});

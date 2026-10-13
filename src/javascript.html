@@ -31,10 +31,12 @@
         const d = String(date.getUTCDate()).padStart(2, '0');
         const hh = String(date.getUTCHours()).padStart(2, '0');
         const mm = String(date.getUTCMinutes()).padStart(2, '0');
+        const ss = String(date.getUTCSeconds()).padStart(2, '0');
         
         if (type === 'date') return y + '-' + m + '-' + d;
         if (type === 'time') return hh + ':' + mm;
         if (type === 'kakao') return m + '/' + d + ' ' + hh + ':' + mm;
+        if (type === 'datetime_seconds') return y + '-' + m + '-' + d + ' ' + hh + ':' + mm + ':' + ss;
         return y + '-' + m + '-' + d + ' ' + hh + ':' + mm;
       } catch (e) { return String(value); }
     },
@@ -73,7 +75,6 @@
       const deniedMessage = ref('');
       const googleLoginUrl = ref('');
       let sessionToken = localStorage.getItem('WANG_RMS_SESSION_TOKEN') || '';
-      localStorage.removeItem('WANG_RMS_SESSION_EMAIL');
       const loginError = ref('');
       const currentView = ref('list');
       const syncCountdown = ref(60);
@@ -212,13 +213,49 @@
       const activityLogs = ref([]);
       const activitySearch = ref('');
       const activityStatus = ref('all');
+      const activityDateStart = ref(Util.formatDate(Util.addDays(today, -6), 'date'));
+      const activityDateEnd = ref(Util.formatDate(today, 'date'));
+      const activityTargetType = ref('all');
+      const activityTargetTypes = ref([]);
+      const activitySortKey = ref('timestamp');
+      const activitySortDirection = ref('desc');
+      const activityNextOffset = ref(null);
+      const activitySnapshotLastRow = ref(null);
+      const activityError = ref('');
       const activityLoading = ref(false);
-      const filteredActivityLogs = computed(() => activityLogs.value.filter(log => {
-        if (activityStatus.value !== 'all' && log.status !== activityStatus.value) return false;
-        const query = activitySearch.value.trim().toLowerCase();
-        return !query || [log.actor_name, log.actor_email, log.action, log.target, log.target_id, log.details]
-          .some(value => String(value || '').toLowerCase().includes(query));
-      }));
+      let activityRefreshQueued = false;
+      let activityRequestId = 0;
+      let activityFilterTimer = null;
+      const activityScrollElement = ref(null);
+      const activityTargetTypeLabels = {
+        reservation: '예약', branch: '지점', user: '사용자', mail_template: '메일 템플릿',
+        duplicate_group: '중복 예약 그룹', mail_thread: '메일 대화', __none__: '기타/시스템'
+      };
+      const activityTargetTypeOptions = computed(() => [...new Set([
+        ...activityTargetTypes.value, ...(activityTargetType.value === 'all' ? [] : [activityTargetType.value])
+      ])].sort());
+      const filteredActivityLogs = computed(() => activityLogs.value);
+      const activityQueryOptions = (offset = 0) => ({
+        startDate: activityDateStart.value, endDate: activityDateEnd.value,
+        query: activitySearch.value.trim(), status: activityStatus.value,
+        targetType: activityTargetType.value, sortKey: activitySortKey.value,
+        sortDirection: activitySortDirection.value, offset,
+        snapshotLastRow: offset ? activitySnapshotLastRow.value : null
+      });
+      const toggleActivitySort = key => {
+        if (activitySortKey.value === key) activitySortDirection.value = activitySortDirection.value === 'asc' ? 'desc' : 'asc';
+        else { activitySortKey.value = key; activitySortDirection.value = key === 'timestamp' ? 'desc' : 'asc'; }
+      };
+      const activitySortIcon = key => activitySortKey.value !== key ? 'ph-arrows-down-up'
+        : activitySortDirection.value === 'asc' ? 'ph-arrow-up' : 'ph-arrow-down';
+      const handleActivityScroll = event => {
+        const el = event.target;
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 160) loadMoreActivityLogs();
+      };
+      watch([activityDateStart, activityDateEnd, activitySearch, activityStatus, activityTargetType, activitySortKey, activitySortDirection], () => {
+        if (activityFilterTimer) clearTimeout(activityFilterTimer);
+        activityFilterTimer = setTimeout(() => refreshActivityLogs(), 250);
+      });
       const currentSlotDate = ref(Util.formatDate(new Date(), 'date'));
       const selectedSlotBranchId = ref('');
       const selectedCalendarBranchId = ref('master');
@@ -1234,7 +1271,10 @@
 
         isMutating.value = true;
         runGoogleScriptSilent('apiUpdateReservationMessageSentAt', res.id)
-          .then(response => { if (!response.success) throw new Error(response.message || '처리 실패'); })
+          .then(response => {
+            if (!response.success) throw new Error(response.message || '처리 실패');
+            if (currentView.value === 'activity') refreshActivityLogs();
+          })
           .catch(err => {
             rollbackTo(res);
             if (listItem && listItem !== res) rollbackTo(listItem);
@@ -1278,6 +1318,8 @@
         if(typeof silent === 'undefined') silent = false;
         try {
           if (!silent) { isLoading.value = true; loadingMessage.value = '데이터 갱신 중...'; }
+          const requestedSessionToken = sessionToken;
+          const initialActivityRequestId = activityRequestId;
           const promises = [
             runReadGoogleScript('apiGetBranches'), runReadGoogleScript('apiGetReservations'), runReadGoogleScript('apiGetSlotMasters'),
             runReadGoogleScript('apiGetSlotDefaults'), runReadGoogleScript('apiGetSlotOverrides'), runReadGoogleScript('apiGetMailTemplates'),
@@ -1285,32 +1327,95 @@
           ];
           if (currentUser.value && currentUser.value.role === 'admin') {
             promises.push(runReadGoogleScript('apiGetUsers'));
-            promises.push(runReadGoogleScript('apiGetActivityLogs'));
+            promises.push(activityDateStart.value && activityDateEnd.value && activityDateStart.value <= activityDateEnd.value
+              ? runReadGoogleScript('apiGetActivityLogs', activityQueryOptions())
+              : Promise.resolve({ data: { rows: [], nextOffset: null, targetTypes: [] } }));
           }
           const results = await Promise.all(promises);
+          if (!sessionToken || requestedSessionToken !== sessionToken) return false;
           branches.value = results[0].data || []; reservations.value = results[1].data || []; slotMasters.value = results[2].data || [];
           slotDefaults.value = results[3].data || []; slotOverrides.value = results[4].data || []; mailTemplates.value = results[5].data || [];
           duplicateGroupsData.value = results[6]?.data || [];
           bouncedEmailsData.value = results[7]?.data || [];
           if (currentUser.value.role === 'admin') {
             users.value = results[8]?.data || [];
-            activityLogs.value = results[9]?.data || [];
+            if (initialActivityRequestId === activityRequestId) {
+              const activityPage = results[9]?.data || {};
+              activityLogs.value = activityPage.rows || [];
+              activityNextOffset.value = activityPage.nextOffset == null ? null : activityPage.nextOffset;
+              activitySnapshotLastRow.value = activityPage.snapshotLastRow || null;
+              activityTargetTypes.value = activityPage.targetTypes || [];
+              nextTick(fillActivityViewport);
+            }
           }
           return true;
         } catch (e) { console.error(e); if (!silent) await showCustomAlert('오류', '데이터 갱신 실패: ' + e.message); return false; }
         finally { if (!silent) isLoading.value = false; }
       };
 
+      const fillActivityViewport = () => {
+        const el = activityScrollElement.value;
+        if (currentView.value === 'activity' && el && el.scrollHeight <= el.clientHeight + 160 && activityNextOffset.value !== null) loadMoreActivityLogs();
+      };
+
       const refreshActivityLogs = async () => {
-        if (activityLoading.value || !currentUser.value || currentUser.value.role !== 'admin') return;
+        if (!currentUser.value || currentUser.value.role !== 'admin') return;
+        if (!activityDateStart.value || !activityDateEnd.value || activityDateStart.value > activityDateEnd.value) {
+          ++activityRequestId;
+          activityError.value = '조회 시작일과 종료일을 확인해 주세요.';
+          activityLogs.value = [];
+          activityNextOffset.value = null;
+          return;
+        }
+        if (activityLoading.value) {
+          activityRefreshQueued = true;
+          return;
+        }
+        const requestId = ++activityRequestId;
+        activityError.value = '';
         activityLoading.value = true;
         try {
-          const result = await runReadGoogleScript('apiGetActivityLogs');
-          activityLogs.value = result.data || [];
+          const result = await runReadGoogleScript('apiGetActivityLogs', activityQueryOptions());
+          if (requestId !== activityRequestId) return;
+          const page = result.data || {};
+          activityLogs.value = page.rows || [];
+          activityNextOffset.value = page.nextOffset == null ? null : page.nextOffset;
+          activitySnapshotLastRow.value = page.snapshotLastRow || null;
+          activityTargetTypes.value = page.targetTypes || [];
+          if (activityScrollElement.value) activityScrollElement.value.scrollTop = 0;
+          nextTick(fillActivityViewport);
         } catch (err) {
-          await showCustomAlert('오류', '시스템 로그를 불러오지 못했습니다: ' + err.message);
+          activityError.value = '시스템 로그를 불러오지 못했습니다: ' + err.message;
         } finally {
           activityLoading.value = false;
+          if (activityRefreshQueued) {
+            activityRefreshQueued = false;
+            refreshActivityLogs();
+          }
+        }
+      };
+
+      const loadMoreActivityLogs = async () => {
+        if (activityLoading.value || activityNextOffset.value === null || activityRefreshQueued) return;
+        const requestId = activityRequestId;
+        const offset = activityNextOffset.value;
+        activityLoading.value = true;
+        try {
+          const result = await runReadGoogleScript('apiGetActivityLogs', activityQueryOptions(offset));
+          if (requestId !== activityRequestId) return;
+          const page = result.data || {};
+          const existingIds = new Set(activityLogs.value.map(log => log.id));
+          activityLogs.value.push(...(page.rows || []).filter(log => !existingIds.has(log.id)));
+          activityNextOffset.value = page.nextOffset == null ? null : page.nextOffset;
+          nextTick(fillActivityViewport);
+        } catch (err) {
+          activityError.value = '다음 로그를 불러오지 못했습니다: ' + err.message;
+        } finally {
+          activityLoading.value = false;
+          if (activityRefreshQueued) {
+            activityRefreshQueued = false;
+            refreshActivityLogs();
+          }
         }
       };
 
@@ -2236,7 +2341,8 @@
                 if (currentView.value === 'settings') currentView.value = 'list';
               }
             } else {
-              await handleLogout();
+              currentUser.value = null;
+              handleGoToLogin();
               needsLogin = true;
             }
           }
@@ -2434,23 +2540,64 @@
         if (!googleLoginUrl.value) event.preventDefault();
       };
 
+      const clearAppBrowserStorage = async () => {
+        for (const storage of [localStorage, sessionStorage]) {
+          try {
+            for (let index = storage.length - 1; index >= 0; index--) {
+              const key = storage.key(index);
+              if (key && key.startsWith('WANG_RMS_')) storage.removeItem(key);
+            }
+          } catch (err) {
+            console.warn('[Logout] 브라우저 저장소 정리 실패:', err);
+          }
+        }
+        if ('caches' in window) {
+          try {
+            const names = await window.caches.keys();
+            await Promise.all(names.filter(name => name.startsWith('WANG_RMS_')).map(name => window.caches.delete(name)));
+          } catch (err) {
+            console.warn('[Logout] 앱 캐시 정리 실패:', err);
+          }
+        }
+      };
+
       const handleLogout = async () => {
         const oldToken = sessionToken;
         sessionToken = '';
-        localStorage.removeItem('WANG_RMS_SESSION_TOKEN');
-        sessionStorage.removeItem('WANG_RMS_SESSION_TOKEN');
-        sessionStorage.removeItem('WANG_RMS_OAUTH_STATE');
+        ++activityRequestId;
+        currentUser.value = null;
+        branches.value = [];
+        reservations.value = [];
+        users.value = [];
+        slotMasters.value = [];
+        slotDefaults.value = [];
+        slotOverrides.value = [];
+        mailTemplates.value = [];
+        duplicateGroupsData.value = [];
+        bouncedEmailsData.value = [];
+        activityLogs.value = [];
+        activityNextOffset.value = null;
+        activityTargetTypes.value = [];
+        activeReservation.value = null;
+        activeSystemData.value = null;
+        originalReservation.value = null;
+        localData.value = {};
+        localMailData.value = {};
+        selectedReservationIds.value = [];
+        userBranchIds.value = [];
+        Object.keys(modalState).forEach(key => { modalState[key] = false; });
+        appState.value = 'login';
+        const storageCleanup = clearAppBrowserStorage();
         try {
           await new Promise(resolve => google.script.run
             .withSuccessHandler(resolve).withFailureHandler(resolve).apiLogout(oldToken));
         } catch (_) {}
-        currentUser.value = null;
+        await storageCleanup;
         filterBranchIds.value = [];
         loginError.value = '';
         googleLoginUrl.value = '';
         isProfileDropdownOpen.value = false;
         isMobileMenuOpen.value = false;
-        appState.value = 'login';
         prepareGoogleLogin();
       };
 
@@ -2471,8 +2618,6 @@
               sessionToken = callback.token;
               localStorage.setItem('WANG_RMS_SESSION_TOKEN', sessionToken);
             } else {
-              sessionToken = '';
-              localStorage.removeItem('WANG_RMS_SESSION_TOKEN');
               loginError.value = callback.error || '로그인 요청이 일치하지 않습니다. 다시 시도해 주세요.';
             }
             // 인증 코드는 1회용이며 URL 기록에 남기지 않는다.
@@ -2481,8 +2626,6 @@
           const auth = await runAuthCheck(sessionToken);
           if (!auth.success) {
             if (auth.data && auth.data.needLogin) {
-              sessionToken = '';
-              localStorage.removeItem('WANG_RMS_SESSION_TOKEN');
               appState.value = 'login';
               isLoading.value = false;
               prepareGoogleLogin();
@@ -2510,6 +2653,7 @@
           }
 
           await refreshInitialData(false);
+          if (!sessionToken || !currentUser.value) return;
           appState.value = 'authorized';
           
           window.addEventListener('keydown', function(e) {
@@ -2648,7 +2792,10 @@
         isProfileDropdownOpen, isNotificationOpen, isMutating, isMobileMenuOpen, logoutUrl, refundOrderUrl, refundTarget, modalState, alertModal,
         activeReservation, activeSystemData,
         reservations, branches, users, mailTemplates, duplicateGroupsData, slotMasters, slotDefaults, slotOverrides,
-        activityLogs, activitySearch, activityStatus, activityLoading, filteredActivityLogs, refreshActivityLogs,
+        activityLogs, activitySearch, activityStatus, activityDateStart, activityDateEnd,
+        activityTargetType, activityTargetTypes, activityTargetTypeOptions, activityTargetTypeLabels, activitySortKey, activitySortDirection,
+        activityNextOffset, activityError, activityLoading, activityScrollElement, filteredActivityLogs,
+        refreshActivityLogs, handleActivityScroll, toggleActivitySort, activitySortIcon,
         filterText, filterStatus, filterDeposit, filterBranchIds, filterDateType, filterDateStart, filterDateEnd,
         filterIssueType, selectedReservationIds,
         sortKey, sortOrder, currentPage, itemsPerPage,

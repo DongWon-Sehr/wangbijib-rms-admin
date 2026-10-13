@@ -216,11 +216,11 @@ function apiGetUsers(token) {
   });
 }
 
-function apiGetActivityLogs(token) {
+function apiGetActivityLogs(token, options) {
   const auth = UserService.checkSession(token);
   if (!auth.success) return auth;
   if (auth.data.role !== Config.USER_ROLES.ADMIN) return Util.createResponse(false, null, '관리자 권한이 필요합니다.');
-  return _executeApi('apiGetActivityLogs', () => ActivityLogService.getRecentLogs(200));
+  return _executeApi('apiGetActivityLogs', () => ActivityLogService.getLogsPage(options));
 }
 
 /**

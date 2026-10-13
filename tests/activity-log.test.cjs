@@ -35,7 +35,10 @@ function setup(role = 'admin') {
     UserService: { checkSession: () => ({ success: true, data: actor }) },
     ReservationService: { getReservationById: () => ({ customer_name: '홍길동' }) },
     SlotService: { getSlotTime: () => '18:00' },
-    Utilities: { getUuid: () => 'log-id' },
+    Utilities: {
+      getUuid: () => 'log-id',
+      formatDate: date => new Date(date.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    },
     LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
     SpreadsheetApp: { flush: () => {} }
   };
@@ -110,6 +113,17 @@ test('a successful external webhook update records its source and reservation ID
   assert.deepEqual([row[5], row[6]], ['reservation', 'r1']);
 });
 
+test('manual Kakao completion is recorded with an explicit action and reservation ID', () => {
+  const { context, sheets } = setup();
+  context.ReservationService.updateMessageSentAt = () => ({ success: true });
+  const response = vm.runInContext('apiUpdateReservationMessageSentAt("token", "r1")', context);
+  assert.equal(response.success, true);
+  const row = sheets.get('activity_log').getRange(2, 1, 1).getValues()[0];
+  assert.equal(row[4], '알림톡 발송 완료 처리');
+  assert.deepEqual([row[5], row[6]], ['reservation', 'r1']);
+  assert.equal(row[9], '완료');
+});
+
 test('every authenticated web mutation passes its actor to the activity recorder', () => {
   const source = fs.readFileSync('src/WebApi.js', 'utf8');
   const methods = [...source.matchAll(/^function (api\w+)\(/gm)].map(match => ({ name: match[1], start: match.index }));
@@ -148,7 +162,7 @@ test('existing activity sheet gains ordered target columns before the next recor
   assert.deepEqual(rows[0], ['id', 'timestamp', 'actor_email', 'actor_name', 'action', 'target_type', 'target_id', 'target', 'details', 'status']);
   assert.deepEqual(rows[1].slice(5), ['', '', 'old-target', '기존 내용', '완료']);
   assert.deepEqual([...rows[2].slice(5, 7)], ['reservation', 'r1']);
-  assert.equal(vm.runInContext('ActivityLogService.getRecentLogs(1)[0].target_id', context), 'r1');
+  assert.equal(vm.runInContext('ActivityLogService.getLogsPage({startDate:"2026-10-01",endDate:"2026-10-14"}).rows[0].target_id', context), 'r1');
 });
 
 test('schema migration reorders existing activity columns without changing records', () => {
@@ -170,9 +184,48 @@ test('failed mutation is recorded and activity list is admin only', () => {
   assert.equal(env.sheets.get('activity_log').getRange(2, 1, 1).getValues()[0][9], '실패');
   assert.equal(vm.runInContext('apiGetActivityLogs("token").success', env.context), false);
   env.context.UserService.checkSession = () => ({ success: true, data: { role: 'admin' } });
-  const result = vm.runInContext('apiGetActivityLogs("token")', env.context);
+  const result = vm.runInContext('apiGetActivityLogs("token", {startDate:"2026-10-01",endDate:"2026-10-14"})', env.context);
   assert.equal(result.success, true);
-  assert.equal(result.data.length, 1);
+  assert.equal(result.data.rows.length, 1);
+});
+
+test('activity pages search the full date range and sort before pagination', () => {
+  const { context, sheets } = setup();
+  const sheet = context.Util.getSpreadsheet().insertSheet('activity_log');
+  sheet.appendRow(['id', 'timestamp', 'actor_email', 'actor_name', 'action', 'target_type', 'target_id', 'target', 'details', 'status']);
+  for (let index = 0; index < 115; index++) {
+    sheet.appendRow(['log-' + index, new Date(Date.UTC(2026, 9, 8, 1, index)), 'admin@example.com', '관리자',
+      index % 2 ? '예약 변경' : '지점 변경', index % 2 ? 'reservation' : 'branch', 'target-' + index,
+      '대상 ' + index, '', index % 3 ? '완료' : '실패']);
+  }
+  const options = { startDate: '2026-10-08', endDate: '2026-10-08', sortKey: 'timestamp', sortDirection: 'desc' };
+  context.options = options;
+  const first = vm.runInContext('apiGetActivityLogs("token", options)', context).data;
+  assert.equal(first.rows.length, 50);
+  assert.equal(first.nextOffset, 50);
+  assert.equal(first.rows[0].id, 'log-114');
+  sheet.appendRow(['new-log', new Date(Date.UTC(2026, 9, 8, 3)), 'admin@example.com', '관리자',
+    '새 작업', 'reservation', 'new-target', '새 대상', '', '완료']);
+  options.offset = first.nextOffset;
+  options.snapshotLastRow = first.snapshotLastRow;
+  const second = vm.runInContext('apiGetActivityLogs("token", options)', context).data;
+  assert.equal(second.rows.length, 50);
+  assert.equal(second.rows[0].id, 'log-64');
+  options.offset = second.nextOffset;
+  const third = vm.runInContext('apiGetActivityLogs("token", options)', context).data;
+  assert.equal(third.rows.length, 15);
+  assert.equal(third.nextOffset, null);
+  options.offset = 0;
+  options.targetType = 'reservation';
+  options.status = '실패';
+  options.query = 'target-9';
+  options.sortKey = 'target_id';
+  options.sortDirection = 'asc';
+  const filtered = vm.runInContext('apiGetActivityLogs("token", options)', context).data;
+  assert.deepEqual([...filtered.rows].map(row => row.target_id), ['target-9', 'target-93', 'target-99']);
+  assert.deepEqual([...filtered.targetTypes], ['branch', 'reservation']);
+  assert.equal(vm.runInContext('apiGetActivityLogs("token", {startDate:"2026-10-09",endDate:"2026-10-09"})', context).data.rows.length, 0);
+  assert.equal(vm.runInContext('apiGetActivityLogs("token", {startDate:"2026-10-09",endDate:"2026-10-08"})', context).success, false);
 });
 
 test('existing schema migration includes activity_log', () => {

@@ -45,7 +45,7 @@ const ActivityLogService = {
       return changes[key];
     });
     const labels = {
-      apiUpdateReservationMessageSentAt: '알림톡 발송 기록',
+      apiUpdateReservationMessageSentAt: '알림톡 발송 완료 처리',
       webhookMessageSentAt: '알림톡 발송 시각 갱신',
       apiSendTemplatedMail: '안내 메일 발송',
       apiInitializeMailThread: '예약 확인 메일 발송',
@@ -153,17 +153,60 @@ const ActivityLogService = {
     }
   },
 
-  getRecentLogs(limit) {
+  getLogsPage(options) {
+    const opts = options || {};
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (!datePattern.test(opts.startDate || '') || !datePattern.test(opts.endDate || '')) throw new Error('조회 시작일과 종료일을 선택해 주세요.');
+    const start = new Date(opts.startDate + 'T00:00:00+09:00');
+    const end = new Date(opts.endDate + 'T00:00:00+09:00');
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end ||
+        Utilities.formatDate(start, 'Asia/Seoul', 'yyyy-MM-dd') !== opts.startDate ||
+        Utilities.formatDate(end, 'Asia/Seoul', 'yyyy-MM-dd') !== opts.endDate) throw new Error('조회 기간이 올바르지 않습니다.');
+    const endExclusive = end.getTime() + 24 * 60 * 60 * 1000;
+    const sortKeys = ['timestamp', 'action', 'target_id', 'status'];
+    const sortKey = sortKeys.includes(opts.sortKey) ? opts.sortKey : 'timestamp';
+    const direction = opts.sortDirection === 'asc' ? 1 : -1;
+    const offset = Math.max(0, Math.floor(Number(opts.offset) || 0));
+    const pageSize = 50;
+    const query = String(opts.query || '').trim().toLocaleLowerCase();
+    const status = String(opts.status || 'all');
+    const targetType = String(opts.targetType || 'all');
     const sheet = Util.getSpreadsheet().getSheetByName(Config.SHEET_NAMES.ACTIVITY_LOG);
-    if (!sheet || sheet.getLastRow() <= 1) return [];
-    const last = sheet.getLastRow();
-    const count = Math.min(Math.max(1, Number(limit) || 200), 500, last - 1);
+    if (!sheet || sheet.getLastRow() <= 1) return { rows: [], nextOffset: null, targetTypes: [] };
+    const requestedLastRow = Math.floor(Number(opts.snapshotLastRow));
+    const last = Number.isFinite(requestedLastRow) && requestedLastRow >= 2
+      ? Math.min(requestedLastRow, sheet.getLastRow()) : sheet.getLastRow();
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const rows = sheet.getRange(last - count + 1, 1, count, headers.length).getValues();
-    return rows.reverse().map(row => Object.fromEntries(this.HEADERS.map(key => {
-      const index = headers.indexOf(key);
-      const value = index < 0 ? '' : row[index];
-      return [key, value instanceof Date ? value.toISOString() : value || ''];
-    })));
+    const indexes = Object.fromEntries(this.HEADERS.map(key => [key, headers.indexOf(key)]));
+    const values = sheet.getRange(2, 1, last - 1, headers.length).getValues();
+    const targetTypes = new Set();
+    const rows = [];
+    values.forEach((row, index) => {
+      const timestamp = row[indexes.timestamp];
+      const time = timestamp instanceof Date ? timestamp.getTime() : new Date(timestamp).getTime();
+      if (!Number.isFinite(time) || time < start.getTime() || time >= endExclusive) return;
+      const log = Object.fromEntries(this.HEADERS.map(key => {
+        const column = indexes[key];
+        const value = column < 0 ? '' : row[column];
+        return [key, value instanceof Date ? value.toISOString() : value || ''];
+      }));
+      targetTypes.add(String(log.target_type || '__none__'));
+      if (targetType !== 'all' && (log.target_type || '__none__') !== targetType) return;
+      if (status !== 'all' && log.status !== status) return;
+      if (query && ![log.actor_name, log.actor_email, log.action, log.target_type, log.target_id, log.target, log.details]
+        .some(value => String(value).toLocaleLowerCase().includes(query))) return;
+      rows.push({ log, time, index });
+    });
+    rows.sort((a, b) => {
+      const comparison = sortKey === 'timestamp' ? a.time - b.time
+        : String(a.log[sortKey]).localeCompare(String(b.log[sortKey]), 'ko', { numeric: true });
+      return comparison * direction || b.index - a.index;
+    });
+    return {
+      rows: rows.slice(offset, offset + pageSize).map(item => item.log),
+      nextOffset: offset + pageSize < rows.length ? offset + pageSize : null,
+      snapshotLastRow: last,
+      targetTypes: [...targetTypes].sort()
+    };
   }
 };
