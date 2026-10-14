@@ -11,6 +11,7 @@ function setup(role = 'admin') {
       appendRow: row => { rows.push(row); return sheet; },
       setFrozenRows: () => {},
       getLastRow: () => rows.length,
+      getDataRange: () => ({ getValues: () => rows }),
       getLastColumn: () => rows[0].length,
       getRange: (row, column, count, width) => ({
         getValues: () => rows.slice(row - 1, row - 1 + count).map(values => values.slice(column - 1, width ? column - 1 + width : undefined)),
@@ -27,6 +28,7 @@ function setup(role = 'admin') {
   const actor = { user_email: 'manager@example.com', user_name: '김매니저', role };
   const context = {
     console,
+    Date,
     Config: { SHEET_NAMES: { ACTIVITY_LOG: 'activity_log' }, USER_ROLES: { ADMIN: 'admin' } },
     Util: {
       getSpreadsheet: () => spreadsheet,
@@ -58,8 +60,8 @@ test('mutation records authenticated actor and readable fields without raw reque
   assert.equal(rows[1][4], '예약 정보 수정');
   assert.equal(rows[1][5], 'reservation');
   assert.equal(rows[1][6], 'reservation-1');
-  assert.equal(rows[1][7], 'reservation-1 (홍길동)');
-  assert.match(rows[1][8], /예약 상태/);
+  assert.equal(rows[1][7], '홍길동');
+  assert.equal(rows[1][8], '변경 내역 확인 불가');
   assert.doesNotMatch(rows[1].join(' '), /비밀 메모 본문|secret|access_token/);
   assert.equal(rows[1][9], '완료');
 });
@@ -79,7 +81,7 @@ test('mail uses reservation ID and single slot uses branch ID with slot details'
   vm.runInContext('_executeApi("apiSendTemplatedMail", () => ({success:true}), {reservationId:"reservation-2", threadId:"thread-1", data:{customer_name:"이손님"}}, UserService.checkSession().data)', context);
   vm.runInContext('_executeApi("apiSaveSystemSettings:slot_override", () => ({success:true}), {data:{branch_id:"branch-1", slot_master_id:"slot-2", date:"2026-10-13"}}, UserService.checkSession().data)', context);
   const rows = sheets.get('activity_log').getRange(2, 1, 2).getValues();
-  assert.equal(rows[0][7], 'reservation-2 (이손님)');
+  assert.equal(rows[0][7], '이손님');
   assert.equal(rows[1][7], 'branch-1');
   assert.match(rows[1][8], /슬롯 ID slot-2 \(18:00\)/);
   assert.deepEqual(rows.map(row => [row[5], row[6]]), [['reservation', 'reservation-2'], ['branch', 'branch-1']]);
@@ -162,7 +164,7 @@ test('existing activity sheet gains ordered target columns before the next recor
   assert.deepEqual(rows[0], ['id', 'timestamp', 'actor_email', 'actor_name', 'action', 'target_type', 'target_id', 'target', 'details', 'status']);
   assert.deepEqual(rows[1].slice(5), ['', '', 'old-target', '기존 내용', '완료']);
   assert.deepEqual([...rows[2].slice(5, 7)], ['reservation', 'r1']);
-  assert.equal(vm.runInContext('ActivityLogService.getLogsPage({startDate:"2026-10-01",endDate:"2026-10-14"}).rows[0].target_id', context), 'r1');
+  assert.equal(vm.runInContext('ActivityLogService.getLogs().rows[1].target_id', context), 'r1');
 });
 
 test('schema migration reorders existing activity columns without changing records', () => {
@@ -189,43 +191,81 @@ test('failed mutation is recorded and activity list is admin only', () => {
   assert.equal(result.data.rows.length, 1);
 });
 
-test('activity pages search the full date range and sort before pagination', () => {
-  const { context, sheets } = setup();
+test('activity initial request returns every row regardless of filters and pagination', () => {
+  const { context } = setup();
   const sheet = context.Util.getSpreadsheet().insertSheet('activity_log');
   sheet.appendRow(['id', 'timestamp', 'actor_email', 'actor_name', 'action', 'target_type', 'target_id', 'target', 'details', 'status']);
   for (let index = 0; index < 115; index++) {
     sheet.appendRow(['log-' + index, new Date(Date.UTC(2026, 9, 8, 1, index)), 'admin@example.com', '관리자',
-      index % 2 ? '예약 변경' : '지점 변경', index % 2 ? 'reservation' : 'branch', 'target-' + index,
-      '대상 ' + index, '', index % 3 ? '완료' : '실패']);
+      '예약 변경', index % 2 ? 'reservation' : 'branch', 'target-' + index, '대상 ' + index, '', index % 3 ? '완료' : '실패']);
   }
-  const options = { startDate: '2026-10-08', endDate: '2026-10-08', sortKey: 'timestamp', sortDirection: 'desc' };
-  context.options = options;
-  const first = vm.runInContext('apiGetActivityLogs("token", options)', context).data;
-  assert.equal(first.rows.length, 50);
-  assert.equal(first.nextOffset, 50);
-  assert.equal(first.rows[0].id, 'log-114');
-  sheet.appendRow(['new-log', new Date(Date.UTC(2026, 9, 8, 3)), 'admin@example.com', '관리자',
-    '새 작업', 'reservation', 'new-target', '새 대상', '', '완료']);
-  options.offset = first.nextOffset;
-  options.snapshotLastRow = first.snapshotLastRow;
-  const second = vm.runInContext('apiGetActivityLogs("token", options)', context).data;
-  assert.equal(second.rows.length, 50);
-  assert.equal(second.rows[0].id, 'log-64');
-  options.offset = second.nextOffset;
-  const third = vm.runInContext('apiGetActivityLogs("token", options)', context).data;
-  assert.equal(third.rows.length, 15);
-  assert.equal(third.nextOffset, null);
-  options.offset = 0;
-  options.targetType = 'reservation';
-  options.status = '실패';
-  options.query = 'target-9';
-  options.sortKey = 'target_id';
-  options.sortDirection = 'asc';
-  const filtered = vm.runInContext('apiGetActivityLogs("token", options)', context).data;
-  assert.deepEqual([...filtered.rows].map(row => row.target_id), ['target-9', 'target-93', 'target-99']);
-  assert.deepEqual([...filtered.targetTypes], ['branch', 'reservation']);
-  assert.equal(vm.runInContext('apiGetActivityLogs("token", {startDate:"2026-10-09",endDate:"2026-10-09"})', context).data.rows.length, 0);
-  assert.equal(vm.runInContext('apiGetActivityLogs("token", {startDate:"2026-10-09",endDate:"2026-10-08"})', context).success, false);
+  const result = vm.runInContext('apiGetActivityLogs("token", {startDate:"2026-10-09",endDate:"2026-10-09",query:"missing",offset:50,status:"실패"})', context);
+  assert.equal(result.success, true);
+  assert.equal(result.data.rows.length, 115);
+  assert.deepEqual([...result.data.targetTypes], ['branch', 'reservation']);
+  assert.equal(typeof result.data.rows[0].timestamp, 'string');
+});
+
+test('duplicate mail records the recipient reservation ID instead of the dated group ID', () => {
+  const { context, sheets } = setup();
+  context.GmailService = { sendDuplicateConfirmationMail: () => ({ success: true }) };
+  context.DuplicateGroupService = { markDuplicateMailSent: () => ({ success: true }) };
+  const result = vm.runInContext('apiSendDuplicateConfirmationMail("token", {groupId:"20261014_01",targetReservationId:"r2",threadId:"thread-2",customerName:"이손님",reservationIds:["r1","r2"]})', context);
+  assert.equal(result.success, true);
+  const row = sheets.get('activity_log').getRange(2, 1, 1).getValues()[0];
+  assert.deepEqual([...row.slice(5, 8)], ['reservation', 'r2', '이손님']);
+});
+
+test('reservation changes persist structured before and after values without cutting JSON', () => {
+  const { context, sheets } = setup();
+  context.changeResult = { activityChanges: [
+    {field:'customer_name',before:'이전 이름',after:'새 이름'},
+    {field:'status',before:'pending',after:'confirm'},
+    {field:'private_notes',before:'기존 메모',after:'메모'.repeat(1000)},
+    {field:'access_token',before:'secret',after:'secret-2'}
+  ] };
+  vm.runInContext('_executeApi("apiUpdateReservation", () => ({success:true,data:changeResult}), {id:"r1",customer_name:"새 이름"}, UserService.checkSession().data)', context);
+  const details = sheets.get('activity_log').getRange(2, 1, 1).getValues()[0][8];
+  const parsed = JSON.parse(details);
+  assert.equal(parsed.changes.length, 3);
+  assert.deepEqual(parsed.changes[0], { field:'고객명', before:'이전 이름', after:'새 이름' });
+  assert.deepEqual(parsed.changes[1], { field:'예약 상태', before:'대기', after:'확정' });
+  assert.equal(parsed.changes[2].after.length, 1501);
+  assert.doesNotMatch(details, /secret|access_token/);
+});
+
+test('client filters and sorts cached logs without issuing requests', () => {
+  const source = fs.readFileSync('src/JavaScript.html', 'utf8');
+  const block = source.slice(source.indexOf('      const activityEntityName ='), source.indexOf('      const toggleActivitySort'));
+  const context = {
+    computed: callback => ({ get value() { return callback(); } }),
+    activityLogs: { value: [
+      {id:'old',timestamp:'2026-10-01T00:00:00Z',status:'완료',target_type:'reservation',target_id:'r0'},
+      {id:'a',timestamp:'2026-10-13T15:00:00Z',status:'완료',target_type:'reservation',target_id:'r10',target:'r10 (홍길동)'},
+      {id:'b',timestamp:'2026-10-14T14:59:59Z',status:'실패',target_type:'branch',target_id:'branch-1'},
+      {id:'outside',timestamp:'2026-10-14T15:00:00Z',status:'완료',target_type:'reservation',target_id:'r20'}
+    ] },
+    branches:{value:[]}, users:{value:[]}, mailTemplates:{value:[]}, reservations:{value:[]}, slotMasters:{value:[]}, duplicateGroupsData:{value:[]}, activityTargetTypeLabels:{},
+    activityDateStart:{value:'2026-10-14'}, activityDateEnd:{value:'2026-10-14'},
+    activitySearch:{value:''}, activityStatus:{value:'all'}, activityTargetType:{value:'all'},
+    activitySortKey:{value:'timestamp'}, activitySortDirection:{value:'desc'}
+  };
+  vm.createContext(context);
+  vm.runInContext(block, context);
+  const ids = () => [...vm.runInContext('filteredActivityLogs.value', context)].map(log => log.id);
+  assert.deepEqual(ids(), ['b','a']);
+  context.activityStatus.value = '완료';
+  context.activitySearch.value = '홍길동';
+  assert.deepEqual(ids(), ['a']);
+  assert.equal(vm.runInContext('activityTarget(activityLogs.value[1])',context),'홍길동');
+  context.activitySearch.value = '';
+  context.activityStatus.value = 'all';
+  context.activityTargetType.value = 'branch';
+  assert.deepEqual(ids(), ['b']);
+  context.activityTargetType.value = 'all';
+  context.activitySortDirection.value = 'asc';
+  assert.deepEqual(ids(), ['a','b']);
+  assert.doesNotMatch(source, /activityQueryOptions|loadMoreActivityLogs|activityFilterTimer/);
 });
 
 test('existing schema migration includes activity_log', () => {
@@ -288,4 +328,90 @@ test('schema migration API requires an admin session', () => {
   assert.equal(rows[1][2], 'admin@example.com');
   assert.equal(rows[1][4], '시트 구조 갱신');
   assert.equal(rows[1][9], '완료');
+});
+
+test('reservation update audits only actual normalized changes, including cleared notes', () => {
+  const { context } = setup();
+  vm.runInContext(fs.readFileSync('src/ReservationService.js', 'utf8'), context);
+  const rows = [
+    ['id','customer_name','pax','private_notes','reservation_date'],
+    ['r1','홍길동',2,'기존 메모',new Date('2026-10-14T09:00:00Z')]
+  ];
+  context.Util.getSpreadsheet = () => ({getSheetByName: () => ({
+    getDataRange: () => ({getValues: () => rows}),
+    getRange: row => ({setValues: values => { rows[row - 1] = values[0]; }})
+  })});
+  context.Util.collapseBlankLines = value => value.replace(/\n{2,}/g, '\n');
+  vm.runInContext('ReservationService.syncCalendarAndSlot = () => {};',context);
+  const result = vm.runInContext('ReservationService.updateReservation("r1", {customer_name:"홍길동",pax:"3",private_notes:"",visit_date:"2026-10-14",visit_time:"19:00",unknown:"ignored"})',context);
+  assert.equal(result.success,true);
+  const changes = JSON.parse(JSON.stringify(result.data.activityChanges));
+  assert.deepEqual(changes.map(change => change.field),['pax','private_notes','reservation_date']);
+  assert.deepEqual(changes[0],{field:'pax',before:2,after:3});
+  assert.deepEqual(changes[1],{field:'private_notes',before:'기존 메모',after:''});
+  assert.equal(changes[2].before,'2026-10-14T09:00:00.000Z');
+  assert.equal(changes[2].after,rows[1][4].toISOString());
+  assert.equal(vm.runInContext('ReservationService.updateReservation("r1", {pax:"3",private_notes:""}).data.activityChanges.length',context),0);
+});
+
+
+test('mutation response returns the persisted log with a serializable timestamp', () => {
+  const { context, sheets } = setup();
+  const response = vm.runInContext('_executeApi("apiUpdateReservationStatus", () => ({success:true}), {id:"r1",status:"confirm"}, UserService.checkSession().data)',context);
+  assert.equal(response.activityLog.id,'log-id');
+  assert.equal(response.activityLog.target_id,'r1');
+  assert.equal(response.activityLog.status,'완료');
+  assert.equal(typeof response.activityLog.timestamp,'string');
+  assert.equal(response.activityLog.id,sheets.get('activity_log').getRange(2,1,1).getValues()[0][0]);
+});
+
+
+test('deposit amount and status changes are both persisted and displayed in the change grid', () => {
+  const { context, sheets } = setup();
+  context.Config.SHEET_NAMES.RESERVATION = 'reservation';
+  vm.runInContext(fs.readFileSync('src/ReservationService.js','utf8'),context);
+  vm.runInContext('ReservationService.getReservationById = () => ({customer_name:"홍길동"});',context);
+  const sheet = context.Util.getSpreadsheet().insertSheet('reservation');
+  sheet.appendRow(['id','customer_name','deposit_amount','deposit_status']);
+  sheet.appendRow(['r1','홍길동',100,'pending']);
+  const response = vm.runInContext('apiUpdateReservation("token",{id:"r1",deposit_amount:200,deposit_status:"confirm"})',context);
+  assert.equal(response.success,true);
+  const changes = JSON.parse(response.activityLog.details).changes;
+  assert.deepEqual(changes,[
+    {field:'예약금 상태',before:'대기',after:'확정'},
+    {field:'예약금',before:'100',after:'200'}
+  ]);
+  const inline = vm.runInContext('apiUpdateDepositStatus("token","r1","refund")',context);
+  assert.equal(inline.success,true);
+  assert.deepEqual(JSON.parse(inline.activityLog.details).changes,[{field:'예약금 상태',before:'확정',after:'환불'}]);
+  const persisted = sheets.get('activity_log').getRange(2,1,2).getValues();
+  assert.deepEqual(JSON.parse(persisted[0][8]).changes,changes);
+  assert.equal(JSON.parse(persisted[1][8]).changes[0].after,'환불');
+});
+
+
+test('reservation targets store name and email, preferring request email over lookup', () => {
+  const { context } = setup();
+  context.ReservationService.getReservationById = () => ({customer_name:'홍길동',email:'old@example.com'});
+  const run = expression => vm.runInContext(expression,context).activityLog.target;
+  assert.equal(run('_executeApi("apiUpdateReservationStatus", () => ({success:true}), {id:"r1",status:"confirm"}, UserService.checkSession().data)'), '홍길동 (old@example.com)');
+  assert.equal(run('_executeApi("apiUpdateReservation", () => ({success:true}), {id:"r1",customer_name:"김손님",email:"new@example.com"}, UserService.checkSession().data)'), '김손님 (new@example.com)');
+  assert.equal(run('_executeApi("apiCorrectEmailAndInitializeThread", () => ({success:true}), {reservationId:"r1",newEmail:"corrected@example.com"}, UserService.checkSession().data)'), '홍길동 (corrected@example.com)');
+  assert.equal(run('_executeApi("apiUpdateReservation", () => ({success:true}), {id:"r1",customer_name:"김손님",email:""}, UserService.checkSession().data)'), '김손님');
+});
+
+
+test('persisted log JSON keeps deposit status directly before amount regardless of request order', () => {
+  const {context,sheets} = setup();
+  context.resultData = {activityChanges:[
+    {field:'deposit_amount',before:100,after:200},
+    {field:'private_notes',before:'기존',after:'수정'},
+    {field:'status',before:'pending',after:'confirm'},
+    {field:'deposit_status',before:'pending',after:'confirm'},
+    {field:'customer_name',before:'이전 이름',after:'새 이름'}
+  ]};
+  const response = vm.runInContext('_executeApi("apiUpdateReservation", () => ({success:true,data:resultData}), {id:"r1"}, UserService.checkSession().data)',context);
+  const persisted = sheets.get('activity_log').getRange(2,1,1).getValues()[0][8];
+  assert.equal(persisted,response.activityLog.details);
+  assert.deepEqual(JSON.parse(persisted).changes.map(change => change.field),['고객명','예약 상태','예약금 상태','예약금','비공개 메모']);
 });

@@ -2,8 +2,8 @@
 const ActivityLogService = {
   HEADERS: ['id', 'timestamp', 'actor_email', 'actor_name', 'action', 'target_type', 'target_id', 'target', 'details', 'status'],
 
-  safeCell(value) {
-    const text = String(value == null ? '' : value).slice(0, 300);
+  safeCell(value, limit = 300) {
+    const text = String(value == null ? '' : value).slice(0, limit);
     return /^[=+@-]/.test(text) ? "'" + text : text;
   },
 
@@ -12,25 +12,28 @@ const ActivityLogService = {
     return name || fallback;
   },
 
-  reservationTarget(id, name) {
+  reservationTarget(id, name, email) {
     if (!id) return '예약';
-    if (!name) {
+    if (!name || email === undefined) {
       try {
         const reservation = ReservationService.getReservationById(id);
-        if (reservation) name = reservation.customer_name;
+        if (reservation) {
+          if (!name) name = reservation.customer_name;
+          if (email === undefined) email = reservation.email;
+        }
       } catch (err) {
         console.warn('[ActivityLog] 예약명 조회 실패: ' + err.message);
       }
     }
-    return this.target(id, name, '예약');
+    return (name || '예약') + (email ? ' (' + email + ')' : '');
   },
 
   describe(apiName, params, resultData) {
     const p = params || {};
     const data = p.data || p;
     const result = resultData || {};
-    const reservationId = p.reservationId || p.id || data.reservationId || data.id;
-    const reservation = () => this.reservationTarget(reservationId, data.customer_name || data.customerName);
+    const reservationId = p.targetReservationId || p.reservationId || p.id || data.reservationId || data.id;
+    const reservation = () => this.reservationTarget(reservationId, data.customer_name || data.customerName, p.newEmail !== undefined ? p.newEmail : data.email);
     const status = { pending: '대기', confirm: '확정', cancel: '취소', refund: '환불', 'n/a': '해당 없음' };
     const changes = {
       customer_name: '고객명', email: '이메일', phone_number: '연락처', branch_id: '지점',
@@ -38,12 +41,27 @@ const ActivityLogService = {
       pax: '인원', status: '예약 상태', deposit_status: '예약금 상태',
       deposit_amount: '예약금', notes: '고객 메모', internal_notes: '관리자 메모', private_notes: '비공개 메모'
     };
-    const fields = Object.keys(data).filter(key => changes[key]).map(key => {
-      if (key === 'status' || key === 'deposit_status') return changes[key] + ': ' + (status[data[key]] || data[key]);
-      if (key === 'pax') return '인원: ' + data[key] + '명';
-      if (key === 'deposit_amount') return '예약금: ' + data[key];
-      return changes[key];
-    });
+    const formatValue = (key, value) => {
+      if (value == null || value === '') return '';
+      if (key === 'status' || key === 'deposit_status') return status[value] || String(value);
+      if (key === 'reservation_date') return Utilities.formatDate(new Date(value), 'Asia/Seoul', 'yyyy-MM-dd HH:mm');
+      const text = String(value);
+      return text.length > 1500 ? text.slice(0, 1500) + '…' : text;
+    };
+    // 요청 JSON의 키 순서와 관계없이 이 순서 그대로 로그 JSON에 저장한다.
+    const changedFields = new Map((result.activityChanges || []).map(change => [change.field, change]));
+    const fieldChanges = Object.keys(changes).filter(key => changedFields.has(key)).map(key => changedFields.get(key)).map(change => ({
+      field: changes[change.field],
+      before: formatValue(change.field, change.before), after: formatValue(change.field, change.after)
+    }));
+    // 셀 한도 안에서도 JSON 구조를 유지한다. 생략된 값에는 표시를 남긴다.
+    while (JSON.stringify({ changes: fieldChanges }).length > 45000) {
+      fieldChanges.forEach(change => {
+        ['before', 'after'].forEach(key => {
+          if (change[key].length > 100) change[key] = change[key].slice(0, Math.floor(change[key].length / 2)) + '…';
+        });
+      });
+    }
     const labels = {
       apiUpdateReservationMessageSentAt: '알림톡 발송 완료 처리',
       webhookMessageSentAt: '알림톡 발송 시각 갱신',
@@ -61,9 +79,9 @@ const ActivityLogService = {
       apiRunSchemaMigration: '시트 구조 갱신',
       apiBackfillDuplicateGroups: '중복 예약 이력 보정'
     };
-    if (apiName === 'apiUpdateReservation') return ['예약 정보 수정', reservation(), fields.join(', '), 'reservation', reservationId];
-    if (apiName === 'apiUpdateReservationStatus') return ['예약 상태 변경', reservation(), status[p.status] || String(p.status || ''), 'reservation', reservationId];
-    if (apiName === 'apiUpdateDepositStatus') return ['예약금 상태 변경', reservation(), status[p.status] || String(p.status || ''), 'reservation', reservationId];
+    if (apiName === 'apiUpdateReservation') return ['예약 정보 수정', reservation(), result.activityChanges ? JSON.stringify({ changes: fieldChanges }) : '변경 내역 확인 불가', 'reservation', reservationId];
+    if (apiName === 'apiUpdateReservationStatus') return ['예약 상태 변경', reservation(), result.activityChanges ? JSON.stringify({ changes: fieldChanges }) : status[p.status] || String(p.status || ''), 'reservation', reservationId];
+    if (apiName === 'apiUpdateDepositStatus') return ['예약금 상태 변경', reservation(), result.activityChanges ? JSON.stringify({ changes: fieldChanges }) : status[p.status] || String(p.status || ''), 'reservation', reservationId];
     if (apiName.startsWith('apiSaveSystemSettings:')) {
       const type = apiName.split(':')[1];
       const actions = { user: '사용자 정보 저장', branch: '지점 정보 저장', mail_template: '메일 템플릿 저장', slot_override: '개별 슬롯 저장', slot_batch: '기본 슬롯 일괄 저장', slot_override_batch: '커스텀 슬롯 일괄 저장' };
@@ -93,6 +111,9 @@ const ActivityLogService = {
     if (apiName.startsWith('apiDeleteSystemData:')) {
       const type = apiName.split(':')[1];
       return [type === 'user' ? '사용자 비활성화' : '메일 템플릿 삭제', p.id || '대상', '', type, p.id];
+    }
+    if (apiName === 'apiSendDuplicateConfirmationMail') {
+      return [labels[apiName], reservation(), '', 'reservation', reservationId];
     }
     const groupId = p.groupId || result.group_id || result.groupId;
     const target = apiName === 'apiSendTemplatedMail'
@@ -143,70 +164,27 @@ const ActivityLogService = {
         id: Utilities.getUuid(), timestamp: new Date(),
         actor_email: this.safeCell(actor.user_email), actor_name: this.safeCell(actor.user_name),
         action: this.safeCell(summary[0]), target: this.safeCell(summary[1]),
-        details: this.safeCell(summary[2]), status: success ? '완료' : '실패',
+        details: this.safeCell(summary[2], 45000), status: success ? '완료' : '실패',
         target_type: this.safeCell(summary[3]), target_id: this.safeCell(summary[4])
       };
       sheet.appendRow(headers.map(header => values[header] === undefined ? '' : values[header]));
       SpreadsheetApp.flush();
+      return { ...values, timestamp: values.timestamp.toISOString() };
     } finally {
       lock.releaseLock();
     }
   },
 
-  getLogsPage(options) {
-    const opts = options || {};
-    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-    if (!datePattern.test(opts.startDate || '') || !datePattern.test(opts.endDate || '')) throw new Error('조회 시작일과 종료일을 선택해 주세요.');
-    const start = new Date(opts.startDate + 'T00:00:00+09:00');
-    const end = new Date(opts.endDate + 'T00:00:00+09:00');
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end ||
-        Utilities.formatDate(start, 'Asia/Seoul', 'yyyy-MM-dd') !== opts.startDate ||
-        Utilities.formatDate(end, 'Asia/Seoul', 'yyyy-MM-dd') !== opts.endDate) throw new Error('조회 기간이 올바르지 않습니다.');
-    const endExclusive = end.getTime() + 24 * 60 * 60 * 1000;
-    const sortKeys = ['timestamp', 'action', 'target_id', 'status'];
-    const sortKey = sortKeys.includes(opts.sortKey) ? opts.sortKey : 'timestamp';
-    const direction = opts.sortDirection === 'asc' ? 1 : -1;
-    const offset = Math.max(0, Math.floor(Number(opts.offset) || 0));
-    const pageSize = 50;
-    const query = String(opts.query || '').trim().toLocaleLowerCase();
-    const status = String(opts.status || 'all');
-    const targetType = String(opts.targetType || 'all');
+  getLogs() {
     const sheet = Util.getSpreadsheet().getSheetByName(Config.SHEET_NAMES.ACTIVITY_LOG);
-    if (!sheet || sheet.getLastRow() <= 1) return { rows: [], nextOffset: null, targetTypes: [] };
-    const requestedLastRow = Math.floor(Number(opts.snapshotLastRow));
-    const last = Number.isFinite(requestedLastRow) && requestedLastRow >= 2
-      ? Math.min(requestedLastRow, sheet.getLastRow()) : sheet.getLastRow();
+    if (!sheet || sheet.getLastRow() <= 1) return { rows: [], targetTypes: [] };
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     const indexes = Object.fromEntries(this.HEADERS.map(key => [key, headers.indexOf(key)]));
-    const values = sheet.getRange(2, 1, last - 1, headers.length).getValues();
-    const targetTypes = new Set();
-    const rows = [];
-    values.forEach((row, index) => {
-      const timestamp = row[indexes.timestamp];
-      const time = timestamp instanceof Date ? timestamp.getTime() : new Date(timestamp).getTime();
-      if (!Number.isFinite(time) || time < start.getTime() || time >= endExclusive) return;
-      const log = Object.fromEntries(this.HEADERS.map(key => {
-        const column = indexes[key];
-        const value = column < 0 ? '' : row[column];
-        return [key, value instanceof Date ? value.toISOString() : value || ''];
-      }));
-      targetTypes.add(String(log.target_type || '__none__'));
-      if (targetType !== 'all' && (log.target_type || '__none__') !== targetType) return;
-      if (status !== 'all' && log.status !== status) return;
-      if (query && ![log.actor_name, log.actor_email, log.action, log.target_type, log.target_id, log.target, log.details]
-        .some(value => String(value).toLocaleLowerCase().includes(query))) return;
-      rows.push({ log, time, index });
-    });
-    rows.sort((a, b) => {
-      const comparison = sortKey === 'timestamp' ? a.time - b.time
-        : String(a.log[sortKey]).localeCompare(String(b.log[sortKey]), 'ko', { numeric: true });
-      return comparison * direction || b.index - a.index;
-    });
-    return {
-      rows: rows.slice(offset, offset + pageSize).map(item => item.log),
-      nextOffset: offset + pageSize < rows.length ? offset + pageSize : null,
-      snapshotLastRow: last,
-      targetTypes: [...targetTypes].sort()
-    };
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+    const rows = values.map(row => Object.fromEntries(this.HEADERS.map(key => {
+      const value = indexes[key] < 0 ? '' : row[indexes[key]];
+      return [key, value instanceof Date ? value.toISOString() : value || ''];
+    })));
+    return { rows, targetTypes: [...new Set(rows.map(log => log.target_type || '__none__'))].sort() };
   }
 };

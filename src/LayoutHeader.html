@@ -228,7 +228,7 @@
         </button>
         <button
           v-if="currentUser && currentUser.role === 'admin'"
-          @click="setCurrentView('activity'); refreshActivityLogs()"
+          @click="setCurrentView('activity')"
           :class="{ 'bg-white text-primary-900 shadow-sm': currentView === 'activity', 'text-primary-100 hover:bg-primary-700/50 hover:text-white': currentView !== 'activity' }"
           class="px-4 py-1.5 rounded-md transition-all duration-200 flex items-center text-sm font-bold"
         >
@@ -391,7 +391,7 @@
               </button>
           <button
                   v-if="currentUser && currentUser.role === 'admin'"
-                  @click="setCurrentViewAndCloseMenu('activity'); refreshActivityLogs()"
+                  @click="setCurrentViewAndCloseMenu('activity')"
                   class="w-full flex items-center px-4 py-3 rounded-xl transition-all duration-200 group"
                   :class="{ 'bg-primary-50 text-primary-800 font-bold': currentView === 'activity', 'text-gray-600 hover:bg-gray-100': currentView !== 'activity' }"
               >

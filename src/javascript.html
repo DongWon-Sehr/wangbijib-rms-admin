@@ -89,6 +89,10 @@
       const isMutating = ref(false);
       // [Race Guard] 마지막 뮤테이션 완료 시각 — 이 시각보다 먼저 시작된 동기화 응답(구버전 데이터)은 폐기
       let lastMutationCompletedAt = 0;
+      let dataMutationRevision = 0;
+      let pendingDataMutations = 0;
+      let optimisticSequence = 0;
+      const reservationLogSnapshots = new Map();
       const isMobileMenuOpen = ref(false);
       const now = ref(new Date());
       const logoutUrl = 'https://accounts.google.com/logout';
@@ -219,28 +223,101 @@
       const activityTargetTypes = ref([]);
       const activitySortKey = ref('timestamp');
       const activitySortDirection = ref('desc');
-      const activityNextOffset = ref(null);
-      const activitySnapshotLastRow = ref(null);
-      const activityError = ref('');
-      const activityLoading = ref(false);
-      let activityRefreshQueued = false;
       let activityRequestId = 0;
-      let activityFilterTimer = null;
       const activityScrollElement = ref(null);
       const activityTargetTypeLabels = {
         reservation: '예약', branch: '지점', user: '사용자', mail_template: '메일 템플릿',
         duplicate_group: '중복 예약 그룹', mail_thread: '메일 대화', __none__: '기타/시스템'
       };
       const activityTargetTypeOptions = computed(() => [...new Set([
-        ...activityTargetTypes.value, ...(activityTargetType.value === 'all' ? [] : [activityTargetType.value])
+        ...activityTargetTypes.value, ...activityLogs.value.map(log => log.target_type || '__none__'), ...(activityTargetType.value === 'all' ? [] : [activityTargetType.value])
       ])].sort());
-      const filteredActivityLogs = computed(() => activityLogs.value);
-      const activityQueryOptions = (offset = 0) => ({
-        startDate: activityDateStart.value, endDate: activityDateEnd.value,
-        query: activitySearch.value.trim(), status: activityStatus.value,
-        targetType: activityTargetType.value, sortKey: activitySortKey.value,
-        sortDirection: activitySortDirection.value, offset,
-        snapshotLastRow: offset ? activitySnapshotLastRow.value : null
+      const activityEntityName = (type, id) => {
+        const value = String(id == null ? '' : id);
+        if (!value) return '';
+        const collections = {branch: branches.value, user: users.value, mail_template: mailTemplates.value, reservation: reservations.value};
+        const item = collections[type]?.find(row => String(row.id) === value);
+        if (type === 'branch') return item?.branch_name_ko || item?.branch_name_en || '지점 정보 없음';
+        if (type === 'user') return item?.user_name || item?.user_email || '사용자 정보 없음';
+        if (type === 'mail_template') return item?.template_name || '메일 템플릿 정보 없음';
+        if (type === 'reservation') return item?.customer_name || '예약 정보 없음';
+        if (type === 'slot_master') {
+          const slot = slotMasters.value.find(row => String(row.id) === value);
+          return slot ? Util.formatDate(slot.time, 'time') : '시간 정보 없음';
+        }
+        if (type === 'mail_thread') {
+          const reservation = reservations.value.find(row => String(row.email_thread_id) === value);
+          return reservation?.customer_name ? reservation.customer_name + ' 메일' : '메일 대화';
+        }
+        if (type === 'duplicate_group') {
+          const group = duplicateGroupsData.value.find(row => String(row.group_id || row.id) === value);
+          const ids = Array.isArray(group?.reservation_ids) ? group.reservation_ids : String(group?.reservation_ids || '').split(',').map(id => id.trim());
+          const members = reservations.value.filter(row => ids.includes(String(row.id)));
+          const names = [...new Set(members.map(row => row.customer_name).filter(Boolean))];
+          return names.length ? names.join(', ') + ' 중복 예약' : '중복 예약 그룹';
+        }
+        return '이름 확인 불가';
+      };
+      const activityChangeValue = (field, value) => {
+        if (value == null || value === '') return '';
+        const types = {branch_id:'branch',지점:'branch',user_id:'user',사용자:'user',reservation_id:'reservation',예약:'reservation',
+          template_id:'mail_template',mail_template_id:'mail_template','메일 템플릿':'mail_template',slot_master_id:'slot_master','슬롯 시간':'slot_master',
+          group_id:'duplicate_group','중복 그룹':'duplicate_group',email_thread_id:'mail_thread','메일 스레드':'mail_thread'};
+        if (types[field]) return activityEntityName(types[field], value);
+        if (field === 'branch_ids' || field === '허용 지점') {
+          const ids = Array.isArray(value) ? value : String(value).split(',');
+          return ids.map(id => activityEntityName('branch', String(id).trim())).join(', ');
+        }
+        const labels = {pending:'대기',confirm:'확정',cancel:'취소',refund:'환불','n/a':'해당 없음',admin:'관리자',manager:'매니저',viewer:'조회자',true:'활성',false:'비활성'};
+        if (['status','deposit_status','예약 상태','예약금 상태','role','권한','enabled','활성 여부'].includes(field)) return labels[String(value)] || String(value);
+        if (/_ids?$/.test(field)) return '이름 확인 불가';
+        return String(value);
+      };
+      const activityChanges = log => {
+        try {
+          const parsed = JSON.parse(log.details);
+          const fields = {branch_id:'지점',user_id:'사용자',reservation_id:'예약',template_id:'메일 템플릿',mail_template_id:'메일 템플릿',
+            slot_master_id:'슬롯 시간',group_id:'중복 그룹',email_thread_id:'메일 스레드',branch_ids:'허용 지점',
+            status:'예약 상태',deposit_status:'예약금 상태',role:'권한',enabled:'활성 여부'};
+          return Array.isArray(parsed.changes) ? parsed.changes.map(change => ({...change,
+            field: fields[change.field] || change.field,
+            before: activityChangeValue(change.key || change.field, change.before),
+            after: activityChangeValue(change.key || change.field, change.after)
+          })) : null;
+        } catch (_) { return null; }
+      };
+      const activityTarget = log => {
+        const id = String(log.target_id || '');
+        const target = String(log.target || '');
+        // 기존 기록의 "ID (이름)"도 이름만 표시하여 삭제된 대상의 이름을 보존한다.
+        if (id && target.startsWith(id + ' (') && target.endsWith(')')) return target.slice(id.length + 2, -1);
+        if (target && target !== id && !target.startsWith('optimistic-')) return target;
+        if (log.target_type) return activityEntityName(log.target_type, id) || activityTargetTypeLabels[log.target_type] || '시스템';
+        return '시스템';
+      };
+      const activityDetails = log => {
+        return String(log.details || '').replace(/슬롯 ID (\S+)(?: \(([^)]+)\))?/g, (_, id, time) =>
+          '슬롯 시간 ' + (time || activityEntityName('slot_master', id))) || '-';
+      };
+      const filteredActivityLogs = computed(() => {
+        if (!activityDateStart.value || !activityDateEnd.value || activityDateStart.value > activityDateEnd.value) return [];
+        const start = new Date(activityDateStart.value + 'T00:00:00+09:00').getTime();
+        const end = new Date(activityDateEnd.value + 'T00:00:00+09:00').getTime() + 86400000;
+        const query = activitySearch.value.trim().toLocaleLowerCase();
+        const direction = activitySortDirection.value === 'asc' ? 1 : -1;
+        return activityLogs.value.filter(log => {
+          const time = new Date(log.timestamp).getTime();
+          return time >= start && time < end
+            && (activityStatus.value === 'all' || log.status === activityStatus.value)
+            && (activityTargetType.value === 'all' || (log.target_type || '__none__') === activityTargetType.value)
+            && (!query || [log.actor_name, log.actor_email, log.action, log.target_type, log.target_id, activityTarget(log), activityDetails(log), JSON.stringify(activityChanges(log) || []), log.details]
+              .some(value => String(value || '').toLocaleLowerCase().includes(query)));
+        }).sort((a, b) => {
+          const key = activitySortKey.value;
+          const comparison = key === 'timestamp' ? new Date(a.timestamp) - new Date(b.timestamp)
+            : String(a[key] || '').localeCompare(String(b[key] || ''), 'ko', { numeric: true });
+          return comparison * direction;
+        });
       });
       const toggleActivitySort = key => {
         if (activitySortKey.value === key) activitySortDirection.value = activitySortDirection.value === 'asc' ? 'desc' : 'asc';
@@ -248,14 +325,6 @@
       };
       const activitySortIcon = key => activitySortKey.value !== key ? 'ph-arrows-down-up'
         : activitySortDirection.value === 'asc' ? 'ph-arrow-up' : 'ph-arrow-down';
-      const handleActivityScroll = event => {
-        const el = event.target;
-        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 160) loadMoreActivityLogs();
-      };
-      watch([activityDateStart, activityDateEnd, activitySearch, activityStatus, activityTargetType, activitySortKey, activitySortDirection], () => {
-        if (activityFilterTimer) clearTimeout(activityFilterTimer);
-        activityFilterTimer = setTimeout(() => refreshActivityLogs(), 250);
-      });
       const currentSlotDate = ref(Util.formatDate(new Date(), 'date'));
       const selectedSlotBranchId = ref('');
       const selectedCalendarBranchId = ref('master');
@@ -343,11 +412,132 @@
       // ============================================================
       // B. HELPER FUNCTIONS
       // ============================================================
+      const settingCollections = () => ({ user: users, branch: branches, mail_template: mailTemplates });
+      const beginOptimisticSettings = (funcName, type, input, requestId) => {
+        if (funcName !== 'apiSaveSystemSettings' && funcName !== 'apiDeleteSystemData') return () => {};
+        const collection = settingCollections()[type];
+        if (!collection) return () => {}; // 슬롯은 저장 핸들러에서 즉시 반영한다.
+        const data = funcName === 'apiDeleteSystemData' ? { id: input } : JSON.parse(JSON.stringify(input));
+        const id = data.id || requestId;
+        const index = collection.value.findIndex(item => item.id === id);
+        const before = index < 0 ? null : JSON.parse(JSON.stringify(collection.value[index]));
+        const deleting = funcName === 'apiDeleteSystemData';
+        const optimistic = { ...before, ...data, id, _optimisticRequestId: requestId };
+        if (deleting && type === 'mail_template') collection.value = collection.value.filter(item => item.id !== id);
+        else {
+          if (deleting) optimistic.enabled = false;
+          else if (!before && optimistic.enabled === undefined) optimistic.enabled = true;
+          if (index < 0) collection.value.push(optimistic);
+          else collection.value.splice(index, 1, optimistic);
+        }
+        return response => {
+          const currentIndex = collection.value.findIndex(item => item._optimisticRequestId === requestId);
+          if (response && response.success) {
+            if (currentIndex >= 0) {
+              const saved = { ...collection.value[currentIndex], ...(response.data || {}) };
+              delete saved._optimisticRequestId;
+              collection.value.splice(currentIndex, 1, saved);
+            }
+          } else if (deleting && type === 'mail_template') {
+            if (before && !collection.value.some(item => item.id === id)) collection.value.splice(Math.min(index, collection.value.length), 0, before);
+          } else if (currentIndex >= 0) {
+            if (before) collection.value.splice(currentIndex, 1, before);
+            else collection.value.splice(currentIndex, 1);
+          }
+        };
+      };
+      const beginOptimisticActivity = (funcName, arg1, arg2, requestId) => {
+        if (!currentUser.value || currentUser.value.role !== 'admin') return () => {};
+        const labels = {
+          apiUpdateReservation: '예약 정보 수정', apiUpdateReservationStatus: '예약 상태 변경', apiUpdateDepositStatus: '예약금 상태 변경',
+          apiUpdateReservationMessageSentAt: '알림톡 발송 완료 처리', apiSendTemplatedMail: '안내 메일 발송',
+          apiInitializeMailThread: '예약 확인 메일 발송', apiCorrectEmailAndInitializeThread: '이메일 수정 및 확인 메일 발송',
+          apiAddLabelsToThread: '메일 라벨 동기화', apiMarkReservationAsRead: '예약 읽음 처리',
+          apiCreateManualDuplicateGroup: '중복 예약 수동 묶기', apiClearDuplicateGroup: '중복 아님 처리',
+          apiRemoveManualDuplicateGroup: '수동 묶음 해제', apiExcludeReservationFromGroup: '중복 묶음에서 예약 제외',
+          apiMarkDuplicateMailSent: '중복 확인 메일 기록', apiSendDuplicateConfirmationMail: '중복 확인 메일 발송',
+          apiRunSchemaMigration: '시트 구조 갱신', apiBackfillDuplicateGroups: '중복 예약 이력 보정'
+        };
+        const settings = { user: '사용자 정보 저장', branch: '지점 정보 저장', mail_template: '메일 템플릿 저장',
+          slot_override: '개별 슬롯 저장', slot_batch: '기본 슬롯 일괄 저장', slot_override_batch: '커스텀 슬롯 일괄 저장' };
+        const p = arg1 && typeof arg1 === 'object' ? arg1 : {};
+        let targetId = p.targetReservationId || p.reservationId || p.id || (typeof arg1 === 'string' ? arg1 : '');
+        let targetType = targetId ? 'reservation' : '';
+        const reservation = reservations.value.find(res => res.id === targetId);
+        const data = p.data || p;
+        const name = data.customer_name || data.customerName || reservation?.customer_name || '예약';
+        const email = p.newEmail ?? data.email ?? reservation?.email;
+        let target = name + (email ? ' (' + email + ')' : '');
+        let action = labels[funcName];
+        let details = '';
+        if (funcName === 'apiSaveSystemSettings' || funcName === 'apiDeleteSystemData') {
+          const data = funcName === 'apiSaveSystemSettings' ? arg2 : { id: arg2 };
+          targetType = String(arg1).startsWith('slot_') ? 'branch' : arg1;
+          targetId = targetType === 'branch' && String(arg1).startsWith('slot_') ? data.branch_id : data.id || requestId;
+          const existing = settingCollections()[arg1]?.value.find(item => item.id === targetId);
+          target = data.user_name || data.user_email || data.template_name || data.branch_name_ko
+            || existing?.user_name || existing?.template_name || existing?.branch_name_ko || targetId;
+          action = funcName === 'apiSaveSystemSettings' ? settings[arg1] : arg1 === 'user' ? '사용자 비활성화' : '메일 템플릿 삭제';
+        } else if (p.groupId && funcName !== 'apiSendDuplicateConfirmationMail') {
+          targetType = 'duplicate_group'; targetId = p.groupId; target = p.groupId;
+        } else if (!targetId && p.threadId) {
+          targetType = 'mail_thread'; targetId = p.threadId; target = p.threadId;
+        } else if (!targetId) { target = '시스템'; }
+        if (!action) return () => {};
+        if (['apiUpdateReservation', 'apiUpdateReservationStatus', 'apiUpdateDepositStatus'].includes(funcName)) {
+          const id = p.id || arg1;
+          const before = reservationLogSnapshots.get(id);
+          reservationLogSnapshots.delete(id);
+          const fields = {customer_name:'고객명',email:'이메일',phone_number:'연락처',branch_id:'지점',reservation_date:'방문 일시',
+            pax:'인원',status:'예약 상태',deposit_status:'예약금 상태',deposit_amount:'예약금',notes:'고객 메모',internal_notes:'관리자 메모',private_notes:'비공개 메모'};
+          const values = funcName === 'apiUpdateReservation' ? {...p} : { [funcName === 'apiUpdateDepositStatus' ? 'deposit_status' : 'status']: arg2 };
+          if (p.visit_date && p.visit_time) values.reservation_date = new Date(Util.parseInAppTz(p.visit_date,p.visit_time)).toISOString();
+          const display = (key, value) => key === 'reservation_date' && value ? Util.formatDate(value, 'datetime') : String(value == null ? '' : value);
+          const changes = before ? Object.keys(fields).filter(key => values[key] !== undefined && String(before[key] ?? '') !== String(values[key] ?? ''))
+            .map(key => ({field:fields[key],before:display(key,before[key]),after:display(key,values[key])})) : [];
+          details = before ? JSON.stringify({changes}) : '저장 처리 중';
+        }
+        const log = {id:requestId,timestamp:new Date().toISOString(),actor_email:currentUser.value.user_email,
+          actor_name:currentUser.value.user_name,action,target_type:targetType,target_id:targetId,target,details,status:'처리 중',_optimistic:true};
+        ++activityRequestId;
+        activityLogs.value.push(log);
+        return response => {
+          ++activityRequestId;
+          activityLogs.value = activityLogs.value.filter(row => row.id !== requestId);
+          const saved = response && response.activityLog;
+          if (saved) {
+            activityLogs.value = activityLogs.value.filter(row => row.id !== saved.id);
+            activityLogs.value.push(saved);
+            activityTargetTypes.value = [...new Set([...activityTargetTypes.value, saved.target_type || '__none__'])];
+          } else if (response && response.success) {
+            activityLogs.value.push({...log,status:'완료',_optimistic:false});
+          }
+        };
+      };
+      const trackDataMutation = (funcName, arg1, arg2) => {
+        if (!/^api(?:Update|Send|Initialize|Correct|Add|Mark|Save|Delete|Create|Clear|Remove|Exclude|Run|Backfill)/.test(funcName)) return () => {};
+        const requestedSessionToken = sessionToken;
+        const requestId = 'optimistic-' + Date.now() + '-' + (++optimisticSequence);
+        const finishActivity = beginOptimisticActivity(funcName, arg1, arg2, requestId);
+        const finishSettings = beginOptimisticSettings(funcName, arg1, arg2, requestId);
+        ++dataMutationRevision;
+        ++pendingDataMutations;
+        return response => {
+          if (sessionToken && requestedSessionToken === sessionToken) {
+            finishSettings(response);
+            if (currentUser.value?.role === 'admin') finishActivity(response);
+          }
+          --pendingDataMutations;
+          ++dataMutationRevision;
+        };
+      };
       const runGoogleScript = (funcName, arg1, arg2, arg3) => {
         isLoading.value = true;
         if (!loadingMessage.value) loadingMessage.value = '처리 중...';
 
-        const finalize = () => {
+        const finishMutation = trackDataMutation(funcName, arg1, arg2);
+        const finalize = response => {
+          finishMutation(response);
           isLoading.value = false;
           loadingMessage.value = ''; // 여기서 초기화
         };
@@ -355,7 +545,7 @@
         return new Promise((resolve, reject) => {
           google.script.run
             .withSuccessHandler((res) => {
-              finalize();
+              finalize(res);
               // res가 null이면 서버 응답 직렬화 실패(Date 객체 포함 등)
               if (res && res.success) resolve(res); else reject(new Error((res && res.message) || "서버 응답이 비어 있습니다 (직렬화 실패 가능)"));
             })
@@ -367,12 +557,15 @@
       };
       
       const runGoogleScriptSilent = (funcName, arg1, arg2, arg3) => {
+        const finishMutation = trackDataMutation(funcName, arg1, arg2);
         return new Promise((resolve, reject) => {
           google.script.run
             .withSuccessHandler((res) => {
+              finishMutation(res);
               if (res && res.success) resolve(res); else reject(new Error((res && res.message) || "서버 응답이 비어 있습니다 (직렬화 실패 가능)"));
             })
             .withFailureHandler((err) => {
+              finishMutation();
               reject(new Error(err));
             })[funcName](sessionToken, arg1, arg2, arg3);
         });
@@ -1144,6 +1337,7 @@
 
         if (await showCustomConfirm('상태 변경', confirmMsg)) {
           const snapshot = res[field];
+          reservationLogSnapshots.set(res.id, { ...res });
           res[field] = newValue;
           showToast('변경되었습니다');
           isMutating.value = true;
@@ -1273,7 +1467,6 @@
         runGoogleScriptSilent('apiUpdateReservationMessageSentAt', res.id)
           .then(response => {
             if (!response.success) throw new Error(response.message || '처리 실패');
-            if (currentView.value === 'activity') refreshActivityLogs();
           })
           .catch(err => {
             rollbackTo(res);
@@ -1285,14 +1478,14 @@
       };
       const confirmDelete = async () => {
         if (await showCustomConfirm("삭제", "삭제하시겠습니까?")) {
-          const res = await runGoogleScript('apiDeleteSystemData', activeSystemData.value.type, localData.value.id);
+          const res = await runGoogleScriptSilent('apiDeleteSystemData', activeSystemData.value.type, localData.value.id);
           if (res.success) { showCustomAlert("완료", "삭제되었습니다."); await refreshInitialData(); closeModal('system'); } 
           else showCustomAlert("실패", res.message);
         }
       };
       const confirmDeleteUser = async (u) => {
         if (await showCustomConfirm("삭제", "삭제하시겠습니까?")) {
-          const res = await runGoogleScript('apiDeleteSystemData', 'user', u.id);
+          const res = await runGoogleScriptSilent('apiDeleteSystemData', 'user', u.id);
           if (res.success) { showCustomAlert("완료", "삭제되었습니다."); refreshInitialData(); } 
           else showCustomAlert("실패", res.message);
         }
@@ -1300,7 +1493,7 @@
       // [NEW] Delete Mail Template Logic
       const confirmDeleteMailTemplate = async (t) => {
         if (await showCustomConfirm("삭제", "정말 삭제하시겠습니까?")) {
-          const res = await runGoogleScript('apiDeleteSystemData', 'mail_template', t.id);
+          const res = await runGoogleScriptSilent('apiDeleteSystemData', 'mail_template', t.id);
           if (res.success) { showCustomAlert("완료", "삭제되었습니다."); refreshInitialData(); }
           else showCustomAlert("실패", res.message);
         }
@@ -1314,11 +1507,13 @@
         isSyncing.value = false;
       };
 
-      const refreshInitialData = async (silent) => {
+      const refreshInitialData = async (silent, background = false) => {
         if(typeof silent === 'undefined') silent = false;
         try {
           if (!silent) { isLoading.value = true; loadingMessage.value = '데이터 갱신 중...'; }
           const requestedSessionToken = sessionToken;
+          const syncStartedAt = Date.now();
+          const initialMutationRevision = dataMutationRevision;
           const initialActivityRequestId = activityRequestId;
           const promises = [
             runReadGoogleScript('apiGetBranches'), runReadGoogleScript('apiGetReservations'), runReadGoogleScript('apiGetSlotMasters'),
@@ -1327,12 +1522,17 @@
           ];
           if (currentUser.value && currentUser.value.role === 'admin') {
             promises.push(runReadGoogleScript('apiGetUsers'));
-            promises.push(activityDateStart.value && activityDateEnd.value && activityDateStart.value <= activityDateEnd.value
-              ? runReadGoogleScript('apiGetActivityLogs', activityQueryOptions())
-              : Promise.resolve({ data: { rows: [], nextOffset: null, targetTypes: [] } }));
+            promises.push(runReadGoogleScript('apiGetActivityLogs'));
           }
           const results = await Promise.all(promises);
           if (!sessionToken || requestedSessionToken !== sessionToken) return false;
+          if (pendingDataMutations || initialMutationRevision !== dataMutationRevision) return false;
+          if (background && (isMutating.value || lastMutationCompletedAt > syncStartedAt
+              || modalState.system || modalState.mail || isModalLoading.value)) return false;
+          if (background) {
+            const locallyReadIds = new Set(reservations.value.filter(res => res.is_read === true).map(res => res.id));
+            (results[1].data || []).forEach(res => { if (locallyReadIds.has(res.id)) res.is_read = true; });
+          }
           branches.value = results[0].data || []; reservations.value = results[1].data || []; slotMasters.value = results[2].data || [];
           slotDefaults.value = results[3].data || []; slotOverrides.value = results[4].data || []; mailTemplates.value = results[5].data || [];
           duplicateGroupsData.value = results[6]?.data || [];
@@ -1341,82 +1541,19 @@
             users.value = results[8]?.data || [];
             if (initialActivityRequestId === activityRequestId) {
               const activityPage = results[9]?.data || {};
-              activityLogs.value = activityPage.rows || [];
-              activityNextOffset.value = activityPage.nextOffset == null ? null : activityPage.nextOffset;
-              activitySnapshotLastRow.value = activityPage.snapshotLastRow || null;
+              activityLogs.value = [...(activityPage.rows || []), ...activityLogs.value.filter(log => log._optimistic)];
               activityTargetTypes.value = activityPage.targetTypes || [];
-              nextTick(fillActivityViewport);
+            }
+          }
+          if (background && modalState.reservation && activeReservation.value) {
+            const freshRes = reservations.value.find(res => res.id === activeReservation.value.id);
+            if (freshRes && freshRes.email_thread_id && !activeReservation.value.email_thread_id) {
+              activeReservation.value.email_thread_id = freshRes.email_thread_id;
             }
           }
           return true;
         } catch (e) { console.error(e); if (!silent) await showCustomAlert('오류', '데이터 갱신 실패: ' + e.message); return false; }
         finally { if (!silent) isLoading.value = false; }
-      };
-
-      const fillActivityViewport = () => {
-        const el = activityScrollElement.value;
-        if (currentView.value === 'activity' && el && el.scrollHeight <= el.clientHeight + 160 && activityNextOffset.value !== null) loadMoreActivityLogs();
-      };
-
-      const refreshActivityLogs = async () => {
-        if (!currentUser.value || currentUser.value.role !== 'admin') return;
-        if (!activityDateStart.value || !activityDateEnd.value || activityDateStart.value > activityDateEnd.value) {
-          ++activityRequestId;
-          activityError.value = '조회 시작일과 종료일을 확인해 주세요.';
-          activityLogs.value = [];
-          activityNextOffset.value = null;
-          return;
-        }
-        if (activityLoading.value) {
-          activityRefreshQueued = true;
-          return;
-        }
-        const requestId = ++activityRequestId;
-        activityError.value = '';
-        activityLoading.value = true;
-        try {
-          const result = await runReadGoogleScript('apiGetActivityLogs', activityQueryOptions());
-          if (requestId !== activityRequestId) return;
-          const page = result.data || {};
-          activityLogs.value = page.rows || [];
-          activityNextOffset.value = page.nextOffset == null ? null : page.nextOffset;
-          activitySnapshotLastRow.value = page.snapshotLastRow || null;
-          activityTargetTypes.value = page.targetTypes || [];
-          if (activityScrollElement.value) activityScrollElement.value.scrollTop = 0;
-          nextTick(fillActivityViewport);
-        } catch (err) {
-          activityError.value = '시스템 로그를 불러오지 못했습니다: ' + err.message;
-        } finally {
-          activityLoading.value = false;
-          if (activityRefreshQueued) {
-            activityRefreshQueued = false;
-            refreshActivityLogs();
-          }
-        }
-      };
-
-      const loadMoreActivityLogs = async () => {
-        if (activityLoading.value || activityNextOffset.value === null || activityRefreshQueued) return;
-        const requestId = activityRequestId;
-        const offset = activityNextOffset.value;
-        activityLoading.value = true;
-        try {
-          const result = await runReadGoogleScript('apiGetActivityLogs', activityQueryOptions(offset));
-          if (requestId !== activityRequestId) return;
-          const page = result.data || {};
-          const existingIds = new Set(activityLogs.value.map(log => log.id));
-          activityLogs.value.push(...(page.rows || []).filter(log => !existingIds.has(log.id)));
-          activityNextOffset.value = page.nextOffset == null ? null : page.nextOffset;
-          nextTick(fillActivityViewport);
-        } catch (err) {
-          activityError.value = '다음 로그를 불러오지 못했습니다: ' + err.message;
-        } finally {
-          activityLoading.value = false;
-          if (activityRefreshQueued) {
-            activityRefreshQueued = false;
-            refreshActivityLogs();
-          }
-        }
       };
 
       const runSchemaMigrationFromSettings = async () => {
@@ -1428,7 +1565,6 @@
           const response = await runGoogleScriptSilent('apiRunSchemaMigration');
           const changes = (response.results || []).filter(item => !item.startsWith('[유지]'));
           await showCustomAlert('점검 완료', changes.length ? changes.join('\n') : '모든 시트와 컬럼이 이미 준비되어 있습니다.');
-          await refreshActivityLogs();
         } catch (err) {
           await showCustomAlert('점검 실패', err.message);
         } finally {
@@ -1526,6 +1662,7 @@
         const target = reservations.value.find(r => r.id === d.id);
         const listSnapshot = target ? JSON.parse(JSON.stringify(target)) : null;
         const prevOriginal = originalReservation.value ? JSON.parse(JSON.stringify(originalReservation.value)) : null;
+        reservationLogSnapshots.set(payload.id, listSnapshot || prevOriginal);
 
         activeReservation.value.reservation_date = newDateIso;
         activeReservation.value.notes = payload.notes;
@@ -2576,7 +2713,6 @@
         duplicateGroupsData.value = [];
         bouncedEmailsData.value = [];
         activityLogs.value = [];
-        activityNextOffset.value = null;
         activityTargetTypes.value = [];
         activeReservation.value = null;
         activeSystemData.value = null;
@@ -2729,38 +2865,16 @@
           });
           
           setInterval(async () => {
-            if (appState.value !== 'authorized' || modalState.system || modalState.mail || isMutating.value) return;
-            if (isSyncing.value) return;
-            
+            if (appState.value !== 'authorized' || modalState.system || modalState.mail || isModalLoading.value
+                || isMutating.value || pendingDataMutations || isLoading.value || isSyncing.value) return;
             syncCountdown.value--;
-            if (syncCountdown.value <= 0) {
-              syncCountdown.value = 60;
-              try {
-                const syncStartedAt = Date.now();
-                const res = await runReadGoogleScript('apiGetReservations');
-                // [Race Guard] 응답 대기 중 뮤테이션이 발생했다면 이 응답은 취소/저장 이전의 구버전 데이터일 수 있으므로 폐기
-                if (isMutating.value || lastMutationCompletedAt > syncStartedAt) {
-                  console.warn('[Sync] 뮤테이션과 경합 감지 → 이번 동기화 응답 폐기');
-                } else if (res.success) {
-                  // [Fix] 동기화 시 로컬에서 이미 읽음(is_read=true) 처리된 상태라면 서버의 과거 데이터(false)를 무시하고 로컬 상태 유지
-                  res.data.forEach(serverRes => {
-                    const localRes = reservations.value.find(r => r.id === serverRes.id);
-                    if (localRes && localRes.is_read === true) {
-                      serverRes.is_read = true;
-                    }
-                  });
-                  reservations.value = res.data;
-                  
-                  // [Sync] 모달이 열려있는 경우 해당 예약의 정보(threadId 등)를 업데이트
-                  if (modalState.reservation && activeReservation.value) {
-                    const freshRes = res.data.find(r => r.id === activeReservation.value.id);
-                    if (freshRes && freshRes.email_thread_id && !activeReservation.value.email_thread_id) {
-                      activeReservation.value.email_thread_id = freshRes.email_thread_id;
-                      console.log(`[Sync] Updated threadId for active modal: ${freshRes.email_thread_id}`);
-                    }
-                  }
-                }
-              } catch (e) { console.warn("Sync failed", e); }
+            if (syncCountdown.value > 0) return;
+            syncCountdown.value = 60;
+            isSyncing.value = true;
+            try {
+              await refreshInitialData(true, true);
+            } finally {
+              isSyncing.value = false;
             }
           }, 1000);
         } catch(e) { console.error(e); alert('초기화 오류: ' + e.message); } finally { if(appState.value !== 'initializing') isLoading.value = false; }
@@ -2794,8 +2908,8 @@
         reservations, branches, users, mailTemplates, duplicateGroupsData, slotMasters, slotDefaults, slotOverrides,
         activityLogs, activitySearch, activityStatus, activityDateStart, activityDateEnd,
         activityTargetType, activityTargetTypes, activityTargetTypeOptions, activityTargetTypeLabels, activitySortKey, activitySortDirection,
-        activityNextOffset, activityError, activityLoading, activityScrollElement, filteredActivityLogs,
-        refreshActivityLogs, handleActivityScroll, toggleActivitySort, activitySortIcon,
+        activityChanges, activityTarget, activityDetails, activityScrollElement, filteredActivityLogs,
+        toggleActivitySort, activitySortIcon,
         filterText, filterStatus, filterDeposit, filterBranchIds, filterDateType, filterDateStart, filterDateEnd,
         filterIssueType, selectedReservationIds,
         sortKey, sortOrder, currentPage, itemsPerPage,

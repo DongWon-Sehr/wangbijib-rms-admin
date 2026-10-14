@@ -130,7 +130,8 @@ const ReservationService = {
 
       // 3. 스키마 기반 데이터 매핑 및 변경 감지
       let isChanged = false;
-      const changes = {}; 
+      const changes = {};
+      const activityChanges = [];
       const updatedRow = [...currentRow];
 
       // 입력 데이터의 모든 키 순회
@@ -186,11 +187,12 @@ const ReservationService = {
           updatedRow[colIdx] = safeValue;
           isChanged = true;
           changes[dbKey] = true;
+          activityChanges.push({ field: dbKey, before: currentVal instanceof Date ? currentVal.toISOString() : currentVal, after: safeValue instanceof Date ? safeValue.toISOString() : safeValue });
         }
       });
 
       if (!isChanged) {
-        return Util.createResponse(true, null, 'No changes detected');
+        return Util.createResponse(true, { activityChanges: [] }, 'No changes detected');
       }
 
       // 4. 메타데이터 업데이트
@@ -223,7 +225,7 @@ const ReservationService = {
         }
       }
 
-      return Util.createResponse(true);
+      return Util.createResponse(true, { activityChanges });
 
     } catch (e) {
       console.log(`[ReservationService] Update Error: ${e.message}`);
@@ -247,7 +249,7 @@ const ReservationService = {
         throw new Error('Fail to update sheet');
       }
 
-      return Util.createResponse(true);
+      return reservationUpdate;
     } catch (e) {
       console.log(`[ReservationService] updateReservationStatus Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);
@@ -270,7 +272,7 @@ const ReservationService = {
         throw new Error('Fail to update sheet');
       }
 
-      return Util.createResponse(true);
+      return reservationUpdate;
     } catch (e) {
       console.log(`[ReservationService] updateDepositStatus Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);

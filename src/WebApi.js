@@ -123,22 +123,22 @@ function _executeApi(apiName, action, params = null, actor = null) {
     console.log(`✅ [API End] ${apiName} (${duration}ms)`);
     
     const response = result && typeof result.success === 'boolean' ? result : Util.createResponse(true, result);
-    if (actor) _recordActivity(apiName, actor, params, response.success, response.success ? response.data : null);
+    if (actor) response.activityLog = _recordActivity(apiName, actor, params, response.success, response.success ? response.data : null) || null;
     return response;
   } catch (err) {
     const duration = new Date().getTime() - startTime;
     console.log(`🔥 [API Error] ${apiName} (${duration}ms) | Params: ${paramLog} | Error: ${err.message}`);
     if (err.stack) console.log(err.stack);
 
-    if (actor) _recordActivity(apiName, actor, params, false);
-
-    return Util.createResponse(false, null, err.message);
+    const response = Util.createResponse(false, null, err.message);
+    if (actor) response.activityLog = _recordActivity(apiName, actor, params, false) || null;
+    return response;
   }
 }
 
 function _recordActivity(apiName, actor, params, success, resultData = null) {
   try {
-    ActivityLogService.record(apiName, actor, params, success, resultData);
+    return ActivityLogService.record(apiName, actor, params, success, resultData);
   } catch (err) {
     // 작업 자체는 이미 끝났을 수 있으므로 중복 실행을 유도하는 실패 응답을 반환하지 않는다.
     console.error('[ActivityLog] 기록 실패: ' + err.message);
@@ -220,7 +220,7 @@ function apiGetActivityLogs(token, options) {
   const auth = UserService.checkSession(token);
   if (!auth.success) return auth;
   if (auth.data.role !== Config.USER_ROLES.ADMIN) return Util.createResponse(false, null, '관리자 권한이 필요합니다.');
-  return _executeApi('apiGetActivityLogs', () => ActivityLogService.getLogsPage(options));
+  return _executeApi('apiGetActivityLogs', () => ActivityLogService.getLogs());
 }
 
 /**
