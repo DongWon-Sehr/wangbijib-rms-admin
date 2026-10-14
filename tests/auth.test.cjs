@@ -142,7 +142,7 @@ test('all public data API entry points check the session', () => {
   }
 });
 
-function setupBrowserAuth({ callback = null, oauthState = null } = {}) {
+function setupBrowserAuth({ callback = null, oauthState = null, clientIp = null } = {}) {
   const savedToken = 'a'.repeat(64);
   const localValues = new Map([
     ['WANG_RMS_SESSION_TOKEN', savedToken],
@@ -162,6 +162,7 @@ function setupBrowserAuth({ callback = null, oauthState = null } = {}) {
   const errors = [];
   const mounted = [];
   const intervals = [];
+  const ipLookups = [];
   const responses = {
     apiCheckSession: { success: true, data: { role: 'admin', allowedBranchIds: ['all'] } },
     apiBeginGoogleLogin: { success: true, data: { state: 'new-state', url: 'https://accounts.google.com/login' } },
@@ -175,6 +176,7 @@ function setupBrowserAuth({ callback = null, oauthState = null } = {}) {
     navigator: { userAgent: 'iPhone', maxTouchPoints: 1 },
     document: { getElementById: () => ({ dataset: {} }), addEventListener() {} },
     window: { WANG_OAUTH_RESULT: callback, addEventListener() {} },
+    ...(clientIp === null ? {} : { fetch: async () => { ipLookups.push(1); if (clientIp instanceof Error) throw clientIp; return { json: async () => ({ ip: clientIp }) }; } }),
     alert: message => errors.push(message),
     setInterval: (callback, duration) => { intervals.push({ callback, duration }); return intervals.length; },
     clearInterval() {},
@@ -214,7 +216,7 @@ function setupBrowserAuth({ callback = null, oauthState = null } = {}) {
   const source = fs.readFileSync('src/javascript.html', 'utf8').replace(/^<script>\s*/, '').replace(/<\/script>\s*$/, '');
   vm.runInContext(source, context);
   return {
-    state, savedToken, localValues, sessionValues, calls, responses, errors, intervals,
+    state, savedToken, localValues, sessionValues, calls, responses, errors, intervals, ipLookups,
     async start() {
       mounted.forEach(hook => hook());
       await new Promise(resolve => setImmediate(resolve));
@@ -250,7 +252,7 @@ test('failed or mismatched OAuth callbacks preserve and verify the saved session
       const browser = setupBrowserAuth({ callback, oauthState: 'expected' });
       await browser.start();
       assert.equal(browser.localValues.get('WANG_RMS_SESSION_TOKEN'), browser.savedToken);
-      assert.equal(browser.calls.find(call => call.name === 'apiCheckSession').args[0], browser.savedToken);
+      assert.equal(browser.calls.find(call => call.name === 'apiCheckSession').args[0].token, browser.savedToken);
       assert.equal(browser.sessionValues.has('WANG_RMS_OAUTH_STATE'), false);
       assert.equal(browser.state.appState.value, 'authorized');
     });
@@ -262,7 +264,7 @@ test('valid OAuth callback replaces the saved token and checks the new session',
   const browser = setupBrowserAuth({ callback: { token, state: 'expected' }, oauthState: 'expected' });
   await browser.start();
   assert.equal(browser.localValues.get('WANG_RMS_SESSION_TOKEN'), token);
-  assert.equal(browser.calls.find(call => call.name === 'apiCheckSession').args[0], token);
+  assert.equal(browser.calls.find(call => call.name === 'apiCheckSession').args[0].token, token);
   assert.equal(browser.state.appState.value, 'authorized');
 });
 
@@ -290,7 +292,7 @@ test('explicit logout revokes the session and clears only the app browser storag
   assert.equal(browser.sessionValues.get('other_app_key'), 'keep');
   assert.equal(browser.state.appState.value, 'login');
   assert.equal(browser.state.currentUser.value, null);
-  assert.equal(browser.calls.find(call => call.name === 'apiLogout').args[0], browser.savedToken);
+  assert.equal(browser.calls.find(call => call.name === 'apiLogout').args[0].token, browser.savedToken);
 });
 
 
@@ -727,4 +729,52 @@ test('branch and mail-template saves close their modal before server acknowledge
   template.resolve({success:false,message:'저장 실패'});
   await editing;
   assert.equal(browser.state.mailTemplates.value[0].body_html,'기존 본문');
+});
+
+test('session envelope carries the client IP into the actor and still validates the token', () => {
+  const env = setup();
+  const begin = vm.runInContext('UserService.beginGoogleLogin(ScriptApp.getService().getUrl())', env.context);
+  env.context.state = begin.state;
+  const session = vm.runInContext('UserService.completeGoogleLogin("code", state, ScriptApp.getService().getUrl())', env.context);
+  env.context.envelope = { token: session.token, ip: '198.51.100.9' };
+  const checked = vm.runInContext('UserService.checkSession(envelope)', env.context);
+  assert.equal(checked.success, true);
+  assert.equal(checked.data.client_ip, '198.51.100.9');
+  assert.equal(vm.runInContext('UserService.checkSession(envelope.token).data.client_ip', env.context), '');
+  assert.equal(vm.runInContext('apiGetBranches(envelope).success', env.context), true);
+  assert.equal(vm.runInContext('UserService.checkSession({token:"not-a-token", ip:"1.1.1.1"}).success', env.context), false);
+  assert.equal(vm.runInContext('UserService.checkSession({ip:"1.1.1.1"}).success', env.context), false);
+  vm.runInContext('apiLogout(envelope)', env.context);
+  assert.equal(vm.runInContext('apiGetBranches(envelope).success', env.context), false);
+});
+
+test('browser attaches the fetched IP to later calls and refreshes it on the 60-second sync', async () => {
+  const browser = setupBrowserAuth({ clientIp: '203.0.113.7' });
+  await browser.start();
+  assert.deepEqual({ ...browser.calls.find(call => call.name === 'apiCheckSession').args[0] }, { token: browser.savedToken, ip: '' });
+  assert.deepEqual({ ...browser.calls.find(call => call.name === 'apiGetBranches').args[0] }, { token: browser.savedToken, ip: '203.0.113.7' });
+  assert.equal(browser.ipLookups.length, 1);
+  browser.state.syncCountdown.value = 1;
+  await browser.intervals.find(interval => interval.duration === 1000).callback();
+  assert.equal(browser.ipLookups.length, 2);
+  browser.state.activeSystemData.value = { type: 'user', mode: 'edit' };
+  browser.state.localData.value = { id: 'user-1', user_name: '김사용자' };
+  browser.state.currentUser.value.user_email = 'admin@example.com';
+  browser.responses.apiSaveSystemSettings = new Promise(() => {});
+  browser.state.handleSystemSave();
+  assert.equal(browser.state.activityLogs.value.find(log => log._optimistic).ip, '203.0.113.7');
+});
+
+test('browser without fetch support sends an empty IP without errors', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  assert.deepEqual({ ...browser.calls.find(call => call.name === 'apiGetBranches').args[0] }, { token: browser.savedToken, ip: '' });
+});
+
+test('failed IP lookup keeps the request going with an empty IP and no error', async () => {
+  const browser = setupBrowserAuth({ clientIp: new Error('blocked by client') });
+  await browser.start();
+  assert.deepEqual({ ...browser.calls.find(call => call.name === 'apiGetBranches').args[0] }, { token: browser.savedToken, ip: '' });
+  assert.equal(browser.state.appState.value, 'authorized');
+  assert.deepEqual(browser.errors, []);
 });

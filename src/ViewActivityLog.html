@@ -31,6 +31,7 @@
         <tr>
           <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 whitespace-nowrap" :aria-sort="activitySortKey === 'timestamp' ? (activitySortDirection === 'asc' ? 'ascending' : 'descending') : 'none'"><button @click="toggleActivitySort('timestamp')">일시 <i class="ph" :class="activitySortIcon('timestamp')"></i></button></th>
           <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 whitespace-nowrap">담당자</th>
+          <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 whitespace-nowrap">IP</th>
           <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 whitespace-nowrap" :aria-sort="activitySortKey === 'action' ? (activitySortDirection === 'asc' ? 'ascending' : 'descending') : 'none'"><button @click="toggleActivitySort('action')">작업 <i class="ph" :class="activitySortIcon('action')"></i></button></th>
           <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 whitespace-nowrap" :aria-sort="activitySortKey === 'target_id' ? (activitySortDirection === 'asc' ? 'ascending' : 'descending') : 'none'"><button @click="toggleActivitySort('target_id')">대상 ID <i class="ph" :class="activitySortIcon('target_id')"></i></button></th>
           <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 whitespace-nowrap">대상</th>
@@ -42,6 +43,7 @@
         <tr v-for="log in filteredActivityLogs" :key="log.id" class="hover:bg-gray-50">
           <td class="px-4 py-3 text-gray-600 whitespace-nowrap">{{ formatDate(log.timestamp, 'datetime_seconds') }}</td>
           <td class="px-4 py-3"><div class="font-semibold text-gray-800">{{ log.actor_name || log.actor_email }}</div><div class="text-xs text-gray-500">{{ log.actor_email }}</div></td>
+          <td class="px-4 py-3 text-gray-600 font-mono text-xs whitespace-nowrap">{{ log.ip || '-' }}</td>
           <td class="px-4 py-3 font-semibold text-gray-800 whitespace-nowrap">{{ log.action }}</td>
           <td class="px-4 py-3 text-gray-600 font-mono text-xs">{{ log.target_id || '-' }}</td>
           <td class="px-4 py-3 text-gray-700">{{ activityTarget(log) }}</td>

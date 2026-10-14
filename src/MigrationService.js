@@ -111,6 +111,7 @@ const MigrationService = {
       { name: 'timestamp', type: 'DATE_TIME' },
       { name: 'actor_email', type: 'TEXT' },
       { name: 'actor_name', type: 'TEXT' },
+      { name: 'ip', type: 'TEXT' },
       { name: 'action', type: 'TEXT' },
       { name: 'target_type', type: 'TEXT' },
       { name: 'target_id', type: 'TEXT' },
@@ -206,19 +207,6 @@ const MigrationService = {
       }
 
       return `[생성] '${sheetName}' 시트 생성 완료 (${columnsConfig.length}개 컬럼)`;
-    }
-
-    if (sheetName === 'activity_log') {
-      const lock = LockService.getScriptLock();
-      lock.waitLock(20000);
-      try {
-        const result = ActivityLogService.ensureSheetLayout(sheet);
-        if (result.reordered) return `[열순서] '${sheetName}' 컬럼 순서 정리 완료`;
-        if (result.missing.length) return `[컬럼추가] '${sheetName}' 누락 컬럼 추가: ${result.missing.join(', ')}`;
-        return `[유지] '${sheetName}' 최신 상태`;
-      } finally {
-        lock.releaseLock();
-      }
     }
 
     const lastCol = sheet.getLastColumn();

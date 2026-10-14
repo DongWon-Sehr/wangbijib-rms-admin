@@ -1,6 +1,11 @@
-/** 인증된 사용자의 데이터 변경 작업만 사람이 읽을 수 있는 항목으로 기록한다. */
+/**
+ * 인증된 사용자의 데이터 변경 작업만 사람이 읽을 수 있는 항목으로 기록한다.
+ * - 스키마는 MigrationService.SCHEMA.activity_log에서 중앙 관리하며 시트 생성·컬럼 추가는 runSchemaMigration으로 수행한다.
+ */
 const ActivityLogService = {
-  HEADERS: ['id', 'timestamp', 'actor_email', 'actor_name', 'action', 'target_type', 'target_id', 'target', 'details', 'status'],
+  columns() {
+    return MigrationService.SCHEMA.activity_log.map(column => column.name);
+  },
 
   safeCell(value, limit = 300) {
     const text = String(value == null ? '' : value).slice(0, limit);
@@ -64,30 +69,6 @@ const ActivityLogService = {
     return [action,target,JSON.stringify(details),type,id];
   },
 
-  ensureSheetLayout(sheet) {
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow(this.HEADERS);
-      sheet.setFrozenRows(1);
-      return { headers: this.HEADERS, missing: this.HEADERS, reordered: false };
-    }
-    let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const missing = this.HEADERS.filter(header => !headers.includes(header));
-    if (missing.length) sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
-    headers = headers.concat(missing);
-    const ordered = this.HEADERS.concat(headers.filter(header => !this.HEADERS.includes(header)));
-    const reordered = ordered.some((header, index) => header !== headers[index]);
-    if (reordered) {
-      const range = sheet.getRange(1, 1, sheet.getLastRow(), headers.length);
-      const rows = range.getValues();
-      range.setValues(rows.map(row => ordered.map(header => {
-        const value = row[headers.indexOf(header)];
-        return value === undefined ? '' : value;
-      })));
-      headers = ordered;
-    }
-    return { headers, missing, reordered };
-  },
-
   record(apiName, actor, params, success, resultData, before = null) {
     if (!ActivityAudit.shouldRecord(apiName)) return null;
     const summary = this.describe(apiName, params, resultData, before);
@@ -95,18 +76,17 @@ const ActivityLogService = {
     const lock = LockService.getScriptLock();
     lock.waitLock(20000);
     try {
-      const spreadsheet = Util.getSpreadsheet();
-      let sheet = spreadsheet.getSheetByName(sheetName);
-      if (!sheet) sheet = spreadsheet.insertSheet(sheetName);
-      const headers = this.ensureSheetLayout(sheet).headers;
+      const sheet = Util.getSpreadsheet().getSheetByName(sheetName);
+      if (!sheet) throw new Error(sheetName + ' 시트가 없습니다. runSchemaMigration을 먼저 실행하세요.');
+      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
       const values = {
         id: Utilities.getUuid(), timestamp: new Date(),
-        actor_email: this.safeCell(actor.user_email), actor_name: this.safeCell(actor.user_name),
+        actor_email: this.safeCell(actor.user_email), actor_name: this.safeCell(actor.user_name), ip: this.safeCell(actor.client_ip, 45),
         action: this.safeCell(summary[0]), target: this.safeCell(summary[1]),
         details: this.safeCell(summary[2], 45000), status: success ? '완료' : '실패',
         target_type: this.safeCell(summary[3]), target_id: this.safeCell(summary[4])
       };
-      sheet.appendRow(headers.map(header => values[header] === undefined ? '' : values[header]));
+      sheet.appendRow(Util.convertObjectToRow(values, headers));
       SpreadsheetApp.flush();
       return { ...values, timestamp: values.timestamp.toISOString() };
     } finally {
@@ -118,9 +98,10 @@ const ActivityLogService = {
     const sheet = Util.getSpreadsheet().getSheetByName(Config.SHEET_NAMES.ACTIVITY_LOG);
     if (!sheet || sheet.getLastRow() <= 1) return { rows: [], targetTypes: [] };
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const indexes = Object.fromEntries(this.HEADERS.map(key => [key, headers.indexOf(key)]));
+    const columns = this.columns();
+    const indexes = Object.fromEntries(columns.map(key => [key, headers.indexOf(key)]));
     const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
-    const rows = values.map(row => Object.fromEntries(this.HEADERS.map(key => {
+    const rows = values.map(row => Object.fromEntries(columns.map(key => {
       const value = indexes[key] < 0 ? '' : row[indexes[key]];
       return [key, value instanceof Date ? value.toISOString() : value || ''];
     })));
