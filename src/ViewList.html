@@ -461,19 +461,11 @@
                       <span>{{ group.mail_sent_at ? '확인메일 재발송' : '확인메일 발송' }}</span>
                     </button>
                     <button 
-                      v-if="group.group_type === 'manual'"
-                      type="button"
-                      @click="handleRemoveManualGroup(group)"
-                      class="px-2.5 py-1 rounded bg-white border border-gray-300 hover:bg-gray-50 text-gray-600 font-semibold transition shadow-sm text-xs"
-                    >
-                      수동 묶음 해제
-                    </button>
-                    <button 
                       type="button"
                       @click="clearDuplicateGroup(group)" 
                       class="px-2.5 py-1 rounded bg-white border border-purple-300 hover:bg-purple-100 text-purple-900 font-semibold transition shadow-sm text-xs flex items-center gap-1"
                     >
-                      <i class="ph ph-shield-check"></i> 전체 중복아님
+                      <i class="ph ph-shield-check"></i> 전체 중복 제외
                     </button>
                   </div>
                 </div>
@@ -597,7 +589,7 @@
                   title="이 예약만 중복 그룹에서 제외"
                 >
                   <i class="ph ph-user-minus"></i>
-                  이 건 제외
+                  개별 중복 제외
                 </button>
               </td>
             </tr>
@@ -801,19 +793,11 @@
                   <span>{{ group.mail_sent_at ? '확인메일 재발송' : '확인메일 발송' }}</span>
                 </button>
                 <button 
-                  v-if="group.group_type === 'manual'"
-                  type="button"
-                  @click.stop="handleRemoveManualGroup(group)"
-                  class="px-2 py-1 rounded bg-white border border-gray-300 text-gray-600 font-medium text-xs shadow-sm"
-                >
-                  수동 묶음 해제
-                </button>
-                <button 
                   type="button"
                   @click.stop="clearDuplicateGroup(group)" 
                   class="px-2 py-1 rounded bg-white border border-purple-300 text-purple-900 font-semibold text-xs flex items-center gap-1 shadow-sm"
                 >
-                  <i class="ph ph-shield-check"></i> 전체 중복아님
+                  <i class="ph ph-shield-check"></i> 전체 중복 제외
                 </button>
               </div>
             </div>
@@ -931,7 +915,7 @@
                 title="이 예약만 중복 그룹에서 제외"
               >
                 <i class="ph ph-user-minus"></i>
-                이 건 제외
+                개별 중복 제외
               </button>
               <button
                 @click.stop="confirmKakao($event, res)"
