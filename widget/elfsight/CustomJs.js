@@ -6,6 +6,7 @@
    4. Auto-expand About Section
    5. Rule-based Time Slot Management (Break Time & Opening Hours)
    6. Mobile Branch Description HTML Rendering
+   7. New Branch Badge (Display Only)
    ========================================================================== */
 
 const STORE_CONFIGS = {
@@ -257,6 +258,83 @@ const setupBranchDisabler = () => {
 };
 
 /* =========================
+   [기능 7] 신규 지점 배지 (지점명 파싱용 텍스트 보존)
+   ========================= */
+const setupNewBranchBadge = () => {
+  const branchName = 'Hansik Wangbijib Central Branch';
+  const badgeAttribute = 'data-wangbijib-new-branch';
+  const normalizeName = element => element.textContent.replace(/\s+/g, ' ').trim();
+  const titles = new Set();
+
+  // 해시 클래스 대신 기존 목록 범위에서 정확히 일치하는 가장 안쪽 제목만 찾는다.
+  document.querySelectorAll('.es-service-selector-container *, [class*="service-card"], [class*="service-card"] *')
+    .forEach(element => {
+      if (element.closest('.es-text-shortener-content, [class*="description"], [class*="Description"], button, input, textarea, select, script, style')) return;
+      if (normalizeName(element) !== branchName) return;
+      if (Array.from(element.children).some(child => normalizeName(child) === branchName)) return;
+      titles.add(element);
+    });
+
+  // 위젯이 같은 DOM을 다른 지점에 재사용할 때 이전 배지를 제거한다.
+  document.querySelectorAll(`[${badgeAttribute}]`).forEach(element => {
+    if (!titles.has(element)) element.removeAttribute(badgeAttribute);
+  });
+  titles.forEach(element => {
+    if (!element.hasAttribute(badgeAttribute)) element.setAttribute(badgeAttribute, '');
+  });
+
+  if (!titles.size || document.getElementById('wangbijib-new-branch-style')) return;
+  const style = document.createElement('style');
+  style.id = 'wangbijib-new-branch-style';
+  // 가상 요소로 지점명 텍스트를 보존하고, 이모지만 따로 크기·그림자를 적용한다.
+  style.textContent = `
+    [${badgeAttribute}] {
+      position: relative !important;
+      display: block !important;
+      overflow: visible !important;
+      -webkit-line-clamp: unset !important;
+      white-space: normal !important;
+    }
+    [${badgeAttribute}]::before {
+      content: 'Newly Opened';
+      display: block;
+      width: max-content;
+      margin: 0 0 8px;
+      padding: 4px 10px 4px 27px;
+      border: 1px solid rgba(139, 92, 246, 0.2);
+      border-radius: 999px;
+      background: linear-gradient(120deg, #ede9fe 0%, #fce7f3 50%, #ccfbf1 100%);
+      color: #6d28d9;
+      box-shadow: 0 2px 6px rgba(109, 40, 217, 0.08);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 16px;
+      letter-spacing: 0.02em;
+      text-transform: none;
+      white-space: nowrap;
+      pointer-events: none;
+      user-select: none;
+    }
+    [${badgeAttribute}]::after {
+      content: '✨';
+      position: absolute;
+      top: 5px;
+      left: 11px;
+      display: block;
+      width: 13px;
+      height: 16px;
+      font-size: 13px;
+      line-height: 16px;
+      letter-spacing: normal;
+      filter: drop-shadow(0 0 0.6px #92400e);
+      pointer-events: none;
+      user-select: none;
+    }
+  `;
+  document.head.appendChild(style);
+};
+
+/* =========================
    [기능 1] 인원수 제한 검증 로직
    ========================= */
 const REQUIRED_FIELDS = [
@@ -493,18 +571,20 @@ const renderMobileDescriptionHtml = () => {
 const observer = new MutationObserver(() => {
   setupValidation();
   setupBranchDisabler();
+  setupNewBranchBadge();
   autoExpandAbout();
   setupTimeSlotDisabler();
   renderMobileDescriptionHtml();
 });
 
-observer.observe(document.body, { childList: true, subtree: true });
+observer.observe(document.body, { childList: true, characterData: true, subtree: true });
 
 // 초기 로드 시 실행
 setupValidation();
 setupBranchDisabler();
+setupNewBranchBadge();
 autoExpandAbout();
 setupTimeSlotDisabler();
 renderMobileDescriptionHtml();
 
-console.log("[WANGBIJIB SCRIPT] All systems loaded (Rule-based + Restored UX + Mobile HTML)");
+console.log("[WANGBIJIB SCRIPT] All systems loaded (Rule-based + Restored UX + Mobile HTML + New Badge)");
