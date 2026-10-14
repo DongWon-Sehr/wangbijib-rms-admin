@@ -75,6 +75,24 @@
       const deniedMessage = ref('');
       const googleLoginUrl = ref('');
       let sessionToken = localStorage.getItem('WANG_RMS_SESSION_TOKEN') || '';
+      // Self-reported public IP for the activity log; refreshed on sync so network changes are reflected.
+      let clientIp = '';
+      // Best effort only: any failure leaves the IP empty and never surfaces to the user.
+      const fetchClientIp = async () => {
+        if (typeof fetch !== 'function') { clientIp = ''; return; }
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timer = controller ? setTimeout(() => controller.abort(), 3000) : null;
+        try {
+          const res = await fetch('https://api.ipify.org?format=json', controller ? { signal: controller.signal } : undefined);
+          const body = await res.json();
+          clientIp = body && typeof body.ip === 'string' ? body.ip : '';
+        } catch (_) {
+          clientIp = '';
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      };
+      const sessionEnvelope = token => ({ token: token || '', ip: clientIp });
       const loginError = ref('');
       const currentView = ref('list');
       const syncCountdown = ref(60);
@@ -326,7 +344,7 @@
           return time >= start && time < end
             && (activityStatus.value === 'all' || log.status === activityStatus.value)
             && (activityTargetType.value === 'all' || (log.target_type || '__none__') === activityTargetType.value)
-            && (!query || [log.actor_name, log.actor_email, log.action, log.target_type, log.target_id, activityTarget(log), activityDetails(log), JSON.stringify(activityChanges(log) || []), JSON.stringify(activityEntries(log)), log.details]
+            && (!query || [log.actor_name, log.actor_email, log.ip, log.action, log.target_type, log.target_id, activityTarget(log), activityDetails(log), JSON.stringify(activityChanges(log) || []), JSON.stringify(activityEntries(log)), log.details]
               .some(value => String(value || '').toLocaleLowerCase().includes(query)));
         }).sort((a, b) => {
           const key = activitySortKey.value;
@@ -599,7 +617,7 @@
         if (!action) return () => {};
         if (funcName === 'apiCreateManualDuplicateGroup') {targetType = 'duplicate_group';targetId = requestId;target = '중복 예약 그룹';}
         const log = {id:requestId,timestamp:new Date().toISOString(),actor_email:currentUser.value.user_email,
-          actor_name:currentUser.value.user_name,action,target_type:targetType,target_id:targetId,target,details,status:'처리 중',_optimistic:true};
+          actor_name:currentUser.value.user_name,ip:clientIp,action,target_type:targetType,target_id:targetId,target,details,status:'처리 중',_optimistic:true};
         ++activityRequestId;
         activityLogs.value.push(log);
         return response => {
@@ -696,7 +714,7 @@
             .withFailureHandler((err) => {
               finalize();
               reject(new Error(err));
-            })[funcName](sessionToken, arg1, arg2, arg3);
+            })[funcName](sessionEnvelope(sessionToken), arg1, arg2, arg3);
         });
       };
       
@@ -712,7 +730,7 @@
             .withFailureHandler((err) => {
               finishMutation();
               reject(new Error(err));
-            })[funcName](sessionToken, arg1, arg2, arg3);
+            })[funcName](sessionEnvelope(sessionToken), arg1, arg2, arg3);
         });
       };
 
@@ -730,7 +748,7 @@
               console.warn('[runAuthCheck Failure]', err);
               resolve({ success: false, data: { needLogin: true }, message: String(err && err.message || err) });
             })
-            .apiCheckSession(token || '');
+            .apiCheckSession(sessionEnvelope(token));
         });
       };
 
@@ -2698,7 +2716,7 @@
         const storageCleanup = clearAppBrowserStorage();
         try {
           await new Promise(resolve => google.script.run
-            .withSuccessHandler(resolve).withFailureHandler(resolve).apiLogout(oldToken));
+            .withSuccessHandler(resolve).withFailureHandler(resolve).apiLogout(sessionEnvelope(oldToken)));
         } catch (_) {}
         await storageCleanup;
         filterBranchIds.value = [];
@@ -2731,6 +2749,7 @@
             // 인증 코드는 1회용이며 URL 기록에 남기지 않는다.
             if (google.script.history) google.script.history.replace({}, {}, '');
           }
+          const ipReady = fetchClientIp();
           const auth = await runAuthCheck(sessionToken);
           if (!auth.success) {
             if (auth.data && auth.data.needLogin) {
@@ -2760,9 +2779,11 @@
             sortKey.value = 'booking_request_date'; sortOrder.value = -1;
           }
 
+          await ipReady;
           await refreshInitialData(false);
           if (!sessionToken || !currentUser.value) return;
           appState.value = 'authorized';
+          window.addEventListener('online', fetchClientIp);
           
           window.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
@@ -2844,6 +2865,7 @@
             syncCountdown.value = 60;
             isSyncing.value = true;
             try {
+              fetchClientIp();
               await refreshInitialData(true, true);
             } finally {
               isSyncing.value = false;
