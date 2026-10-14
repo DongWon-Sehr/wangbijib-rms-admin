@@ -98,8 +98,16 @@ const UserService = {
     return user;
   },
 
+  // Client sends {token, ip}; ip is self-reported and only used for the activity log.
+  unwrapSession(token) {
+    if (token && typeof token === 'object') return { token: token.token, ip: typeof token.ip === 'string' ? token.ip.slice(0, 45) : '' };
+    return { token, ip: '' };
+  },
+
   checkSession(token) {
     try {
+      const session = this.unwrapSession(token);
+      token = session.token;
       if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) {
         return Util.createResponse(false, { needLogin: true }, '로그인이 필요합니다.');
       }
@@ -127,7 +135,8 @@ const UserService = {
         user_email: user.user_email,
         user_name: user.user_name,
         role: user.role,
-        allowedBranchIds: allowedBranchIds
+        allowedBranchIds: allowedBranchIds,
+        client_ip: session.ip
       });
     } catch (e) {
       return Util.createResponse(false, { needLogin: true }, e.message);
@@ -135,6 +144,7 @@ const UserService = {
   },
 
   logout(token) {
+    token = this.unwrapSession(token).token;
     if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) {
       const key = this.sessionKey(token);
       CacheService.getScriptCache().remove(key);
