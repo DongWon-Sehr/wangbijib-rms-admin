@@ -89,7 +89,7 @@ const ReservationService = {
    * [Update] 예약 읽음 처리 (is_read 단독 업데이트)
    */
   markAsRead(id) {
-    return this.updateCell(id, 'is_read', true);
+    return this.updateReservation(id, { is_read: true });
   },
 
   /**
@@ -294,7 +294,7 @@ const ReservationService = {
         console.log(`[ReservationService] updateMessageSentAt Warn: Reservation Label 업데이트 실패`);
       }
 
-      return Util.createResponse(true);
+      return reservationUpdate;
     } catch (e) {
       console.log(`[ReservationService] updateMessageSentAt Error: ${e.message}`);
       return Util.createResponse(false, null, e.message);

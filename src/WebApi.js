@@ -53,7 +53,6 @@ function doPost(e) {
       }
       
       console.log(`[Webhook] 예약(${reservationId}) 전송일시 업데이트 완료: ${now}`);
-      _recordActivity('webhookMessageSentAt', { user_email: '', user_name: 'SYSTEM' }, { id: reservationId }, true);
     }
 
     // 4. 응답
@@ -104,6 +103,11 @@ function _getLogoDataUri() {
  */
 function _executeApi(apiName, action, params = null, actor = null) {
   const startTime = new Date().getTime();
+  let auditBefore = null;
+  if (actor && ActivityAudit.shouldRecord(apiName)) {
+    try { auditBefore = ActivityAudit.capture(apiName, params); }
+    catch (err) { console.warn('[ActivityAudit] 변경 전 조회 실패: ' + err.message); }
+  }
   
   // 파라미터 로깅
   let paramLog = 'None';
@@ -123,7 +127,7 @@ function _executeApi(apiName, action, params = null, actor = null) {
     console.log(`✅ [API End] ${apiName} (${duration}ms)`);
     
     const response = result && typeof result.success === 'boolean' ? result : Util.createResponse(true, result);
-    if (actor) response.activityLog = _recordActivity(apiName, actor, params, response.success, response.success ? response.data : null) || null;
+    if (actor) response.activityLog = _recordActivity(apiName, actor, params, response.success, response.success ? response.data : null, auditBefore) || null;
     return response;
   } catch (err) {
     const duration = new Date().getTime() - startTime;
@@ -131,14 +135,14 @@ function _executeApi(apiName, action, params = null, actor = null) {
     if (err.stack) console.log(err.stack);
 
     const response = Util.createResponse(false, null, err.message);
-    if (actor) response.activityLog = _recordActivity(apiName, actor, params, false) || null;
+    if (actor) response.activityLog = _recordActivity(apiName, actor, params, false, null, auditBefore) || null;
     return response;
   }
 }
 
-function _recordActivity(apiName, actor, params, success, resultData = null) {
+function _recordActivity(apiName, actor, params, success, resultData = null, auditBefore = null) {
   try {
-    return ActivityLogService.record(apiName, actor, params, success, resultData);
+    return ActivityLogService.record(apiName, actor, params, success, resultData, auditBefore);
   } catch (err) {
     // 작업 자체는 이미 끝났을 수 있으므로 중복 실행을 유도하는 실패 응답을 반환하지 않는다.
     console.error('[ActivityLog] 기록 실패: ' + err.message);
@@ -359,7 +363,8 @@ function apiInitializeMailThread(token, payload) {
     if (data && data.email) {
       updateFields.email = data.email;
     }
-    ReservationService.updateReservation(reservationId, updateFields);
+    const saved = ReservationService.updateReservation(reservationId, updateFields);
+    if (!saved.success) throw new Error(saved.message);
     
     return { threadId: threadId, email: data ? data.email : undefined };
   }, payload, auth.data);
@@ -375,6 +380,8 @@ function apiCorrectEmailAndInitializeThread(token, payload) {
     const { reservationId, newEmail, data } = payload;
     if (!reservationId || !newEmail) throw new Error('예약 ID 또는 새로운 이메일 주소가 누락되었습니다.');
 
+    const previous = ReservationService.getReservationById(reservationId);
+    try {
     // [STEP 1] 시트 DB의 이메일 주소를 먼저 수정하여 저장
     const updateRes = ReservationService.updateReservation(reservationId, { email: newEmail });
     if (!updateRes.success) {
@@ -392,9 +399,17 @@ function apiCorrectEmailAndInitializeThread(token, payload) {
     console.log(`[EmailCorrection] 예약확인 메일 발송 완료: threadId=${threadId}`);
 
     // [STEP 3] 발송된 신규 threadId를 시트 DB에 저장
-    ReservationService.updateReservation(reservationId, { email_thread_id: threadId });
+    const saved = ReservationService.updateReservation(reservationId, { email_thread_id: threadId });
+    if (!saved.success) throw new Error(saved.message);
 
-    return { threadId: threadId, email: newEmail };
+    return { threadId: threadId, email: newEmail, activityChanges: updateRes.data?.activityChanges || [] };
+    } catch (err) {
+      if (previous) {
+        const restored = ReservationService.updateReservation(reservationId, {email:previous.email || '',email_thread_id:previous.email_thread_id || ''});
+        if (!restored.success) console.error('[EmailCorrection] 롤백 실패: ' + restored.message);
+      }
+      throw err;
+    }
   }, payload, auth.data);
 }
 
@@ -438,6 +453,7 @@ function apiSaveSystemSettings(token, type, data) {
   const auth = UserService.checkSession(token);
   if (!auth.success) return auth;
   if (type === 'user' && auth.data.role !== Config.USER_ROLES.ADMIN) return Util.createResponse(false, null, '관리자 권한이 필요합니다.');
+  if (type === 'branch' && !data.id && auth.data.role !== Config.USER_ROLES.ADMIN) return Util.createResponse(false, null, '관리자 권한이 필요합니다.');
   // [Param Log] {type, data} 객체 전달
   return _executeApi(`apiSaveSystemSettings:${type}`, () => {
     const session = UserService.checkSession(token);
@@ -447,7 +463,8 @@ function apiSaveSystemSettings(token, type, data) {
       case 'user':
         return data.id ? UserService.updateUser(data.id, data) : UserService.createUser(data);
       case 'branch':
-        return BranchService.updateBranch(data.id, data);
+        if (!data.id && session.data.role !== Config.USER_ROLES.ADMIN) throw new Error('관리자 권한이 필요합니다.');
+        return data.id ? BranchService.updateBranch(data.id, data) : BranchService.createBranch(data);
       case 'mail_template':
         // [FIX] ID 유무에 따라 생성/수정 분기 및 전체 데이터 전달
         return data.id ? MailTemplateService.updateTemplate(data.id, data) : MailTemplateService.createTemplate(data);
@@ -514,15 +531,6 @@ function apiClearDuplicateGroup(token, params) {
   return _executeApi('apiClearDuplicateGroup', () => {
     UserService.checkSession(token);
     return DuplicateGroupService.clearGroup(params.groupId, params.reservationIds, params.earliestDate);
-  }, params, auth.data);
-}
-
-function apiRemoveManualDuplicateGroup(token, params) {
-  const auth = UserService.checkSession(token);
-  if (!auth.success) return auth;
-  return _executeApi('apiRemoveManualDuplicateGroup', () => {
-    UserService.checkSession(token);
-    return DuplicateGroupService.removeManualGroup(params.groupId);
   }, params, auth.data);
 }
 

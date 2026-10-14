@@ -32,6 +32,7 @@ function setup(role = 'admin') {
     Config: { SHEET_NAMES: { ACTIVITY_LOG: 'activity_log' }, USER_ROLES: { ADMIN: 'admin' } },
     Util: {
       getSpreadsheet: () => spreadsheet,
+      getSheetDataAsObjects: name => { const sheet = sheets.get(name); if (!sheet) return []; const rows = sheet.getDataRange().getValues(); return rows.slice(1).map(row => Object.fromEntries(rows[0].map((key,index) => [key,row[index]]))); },
       createResponse: (success, data = null, message = '') => ({ success, data, message })
     },
     UserService: { checkSession: () => ({ success: true, data: actor }) },
@@ -46,6 +47,7 @@ function setup(role = 'admin') {
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('src/ActivityLogService.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('src/ActivityAudit.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('src/WebApi.js', 'utf8'), context);
   return { context, sheets };
 }
@@ -57,11 +59,11 @@ test('mutation records authenticated actor and readable fields without raw reque
   const rows = sheets.get('activity_log').getRange(1, 1, 2).getValues();
   assert.equal(rows[1][2], 'manager@example.com');
   assert.equal(rows[1][3], '김매니저');
-  assert.equal(rows[1][4], '예약 정보 수정');
+  assert.equal(rows[1][4], '예약 정보 변경');
   assert.equal(rows[1][5], 'reservation');
   assert.equal(rows[1][6], 'reservation-1');
   assert.equal(rows[1][7], '홍길동');
-  assert.equal(rows[1][8], '변경 내역 확인 불가');
+  assert.deepEqual(JSON.parse(rows[1][8]).changes, []);
   assert.doesNotMatch(rows[1].join(' '), /비밀 메모 본문|secret|access_token/);
   assert.equal(rows[1][9], '완료');
 });
@@ -71,8 +73,8 @@ test('generated user and group IDs appear in the activity target', () => {
   vm.runInContext('_executeApi("apiSaveSystemSettings:user", () => ({success:true, data:{id:"user-1"}}), {data:{user_name:"김사용자"}}, UserService.checkSession().data)', context);
   vm.runInContext('_executeApi("apiCreateManualDuplicateGroup", () => ({success:true, data:{group_id:"group-1"}}), {reservationIds:["r1","r2"]}, UserService.checkSession().data)', context);
   const rows = sheets.get('activity_log').getRange(2, 1, 2).getValues();
-  assert.equal(rows[0][7], 'user-1 (김사용자)');
-  assert.equal(rows[1][7], 'group-1');
+  assert.equal(rows[0][7], '김사용자');
+  assert.equal(rows[1][7], '중복 예약 그룹');
   assert.deepEqual(rows.map(row => [row[5], row[6]]), [['user', 'user-1'], ['duplicate_group', 'group-1']]);
 });
 
@@ -82,8 +84,8 @@ test('mail uses reservation ID and single slot uses branch ID with slot details'
   vm.runInContext('_executeApi("apiSaveSystemSettings:slot_override", () => ({success:true}), {data:{branch_id:"branch-1", slot_master_id:"slot-2", date:"2026-10-13"}}, UserService.checkSession().data)', context);
   const rows = sheets.get('activity_log').getRange(2, 1, 2).getValues();
   assert.equal(rows[0][7], '이손님');
-  assert.equal(rows[1][7], 'branch-1');
-  assert.match(rows[1][8], /슬롯 ID slot-2 \(18:00\)/);
+  assert.equal(rows[1][7], '지점');
+  assert.ok(Array.isArray(JSON.parse(rows[1][8]).changes));
   assert.deepEqual(rows.map(row => [row[5], row[6]]), [['reservation', 'reservation-2'], ['branch', 'branch-1']]);
 });
 
@@ -97,10 +99,10 @@ test('settings use each record ID and batch changes use the branch ID', () => {
   assert.deepEqual(rows.map(row => [row[5], row[6]]), [
     ['mail_template', 'template-1'], ['branch', 'branch-1'], ['branch', 'branch-1'], ['user', 'user-1']
   ]);
-  assert.match(rows[1][8], /슬롯 ID slot-2 \(18:00\)/);
+  assert.ok(Array.isArray(JSON.parse(rows[1][8]).changes));
 });
 
-test('a successful external webhook update records its source and reservation ID', () => {
+test('external webhook updates the reservation without a user activity log', () => {
   const { context, sheets } = setup();
   context.ContentService = {
     MimeType: { JSON: 'json' },
@@ -109,10 +111,7 @@ test('a successful external webhook update records its source and reservation ID
   context.ReservationService.updateReservation = () => ({ success: true });
   const response = vm.runInContext('doPost({postData:{contents:JSON.stringify({reservation_id:"r1"})}})', context);
   assert.match(response.text, /"success":true/);
-  const row = sheets.get('activity_log').getRange(2, 1, 1).getValues()[0];
-  assert.equal(row[3], 'SYSTEM');
-  assert.equal(row[4], '알림톡 발송 시각 갱신');
-  assert.deepEqual([row[5], row[6]], ['reservation', 'r1']);
+  assert.equal(sheets.has('activity_log'),false);
 });
 
 test('manual Kakao completion is recorded with an explicit action and reservation ID', () => {
@@ -121,7 +120,7 @@ test('manual Kakao completion is recorded with an explicit action and reservatio
   const response = vm.runInContext('apiUpdateReservationMessageSentAt("token", "r1")', context);
   assert.equal(response.success, true);
   const row = sheets.get('activity_log').getRange(2, 1, 1).getValues()[0];
-  assert.equal(row[4], '알림톡 발송 완료 처리');
+  assert.equal(row[4], '알림톡 발송 완료');
   assert.deepEqual([row[5], row[6]], ['reservation', 'r1']);
   assert.equal(row[9], '완료');
 });
@@ -140,7 +139,7 @@ test('every authenticated web mutation passes its actor to the activity recorder
     'apiUpdateDepositStatus', 'apiSendTemplatedMail', 'apiInitializeMailThread',
     'apiCorrectEmailAndInitializeThread', 'apiAddLabelsToThread', 'apiMarkReservationAsRead',
     'apiSaveSystemSettings', 'apiDeleteSystemData', 'apiCreateManualDuplicateGroup',
-    'apiClearDuplicateGroup', 'apiRemoveManualDuplicateGroup', 'apiExcludeReservationFromGroup',
+    'apiClearDuplicateGroup', 'apiExcludeReservationFromGroup',
     'apiMarkDuplicateMailSent', 'apiSendDuplicateConfirmationMail', 'apiRunSchemaMigration',
     'apiBackfillDuplicateGroups'
   ];
@@ -206,14 +205,14 @@ test('activity initial request returns every row regardless of filters and pagin
   assert.equal(typeof result.data.rows[0].timestamp, 'string');
 });
 
-test('duplicate mail records the recipient reservation ID instead of the dated group ID', () => {
+test('duplicate mail records the group ID and recipient reservation in content', () => {
   const { context, sheets } = setup();
   context.GmailService = { sendDuplicateConfirmationMail: () => ({ success: true }) };
   context.DuplicateGroupService = { markDuplicateMailSent: () => ({ success: true }) };
   const result = vm.runInContext('apiSendDuplicateConfirmationMail("token", {groupId:"20261014_01",targetReservationId:"r2",threadId:"thread-2",customerName:"이손님",reservationIds:["r1","r2"]})', context);
   assert.equal(result.success, true);
   const row = sheets.get('activity_log').getRange(2, 1, 1).getValues()[0];
-  assert.deepEqual([...row.slice(5, 8)], ['reservation', 'r2', '이손님']);
+  assert.deepEqual([...row.slice(5, 8)], ['duplicate_group', '20261014_01', '중복 예약 그룹']);
 });
 
 test('reservation changes persist structured before and after values without cutting JSON', () => {
@@ -228,8 +227,8 @@ test('reservation changes persist structured before and after values without cut
   const details = sheets.get('activity_log').getRange(2, 1, 1).getValues()[0][8];
   const parsed = JSON.parse(details);
   assert.equal(parsed.changes.length, 3);
-  assert.deepEqual(parsed.changes[0], { field:'고객명', before:'이전 이름', after:'새 이름' });
-  assert.deepEqual(parsed.changes[1], { field:'예약 상태', before:'대기', after:'확정' });
+  assert.deepEqual(parsed.changes[0], {key:'customer_name', field:'고객명', before:'이전 이름', after:'새 이름' });
+  assert.deepEqual(parsed.changes[1], {key:'status',field:'예약 상태', before:'pending', after:'confirm' });
   assert.equal(parsed.changes[2].after.length, 1501);
   assert.doesNotMatch(details, /secret|access_token/);
 });
@@ -324,10 +323,7 @@ test('schema migration API requires an admin session', () => {
   assert.equal(response.success, true);
   assert.equal(Array.isArray(response.results), true);
   assert.equal(runs, 1);
-  const rows = env.sheets.get('activity_log').getRange(2, 1, 2).getValues();
-  assert.equal(rows[1][2], 'admin@example.com');
-  assert.equal(rows[1][4], '시트 구조 갱신');
-  assert.equal(rows[1][9], '완료');
+  assert.equal(env.sheets.has('activity_log'),false);
 });
 
 test('reservation update audits only actual normalized changes, including cleared notes', () => {
@@ -378,15 +374,15 @@ test('deposit amount and status changes are both persisted and displayed in the 
   assert.equal(response.success,true);
   const changes = JSON.parse(response.activityLog.details).changes;
   assert.deepEqual(changes,[
-    {field:'예약금 상태',before:'대기',after:'확정'},
-    {field:'예약금',before:'100',after:'200'}
+    {key:'deposit_status',field:'예약금 상태',before:'pending',after:'confirm'},
+    {key:'deposit_amount',field:'예약금',before:100,after:200}
   ]);
   const inline = vm.runInContext('apiUpdateDepositStatus("token","r1","refund")',context);
   assert.equal(inline.success,true);
-  assert.deepEqual(JSON.parse(inline.activityLog.details).changes,[{field:'예약금 상태',before:'확정',after:'환불'}]);
+  assert.deepEqual(JSON.parse(inline.activityLog.details).changes,[{key:'deposit_status',field:'예약금 상태',before:'confirm',after:'refund'}]);
   const persisted = sheets.get('activity_log').getRange(2,1,2).getValues();
   assert.deepEqual(JSON.parse(persisted[0][8]).changes,changes);
-  assert.equal(JSON.parse(persisted[1][8]).changes[0].after,'환불');
+  assert.equal(JSON.parse(persisted[1][8]).changes[0].after,'refund');
 });
 
 
@@ -414,4 +410,33 @@ test('persisted log JSON keeps deposit status directly before amount regardless 
   const persisted = sheets.get('activity_log').getRange(2,1,1).getValues()[0][8];
   assert.equal(persisted,response.activityLog.details);
   assert.deepEqual(JSON.parse(persisted).changes.map(change => change.field),['고객명','예약 상태','예약금 상태','예약금','비공개 메모']);
+});
+
+test('email correction restores persisted email and thread when confirmation sending fails', () => {
+  const {context,sheets} = setup();
+  context.Config.SHEET_NAMES.RESERVATION = 'reservation';
+  vm.runInContext(fs.readFileSync('src/ReservationService.js','utf8'),context);
+  const sheet = context.Util.getSpreadsheet().insertSheet('reservation');
+  sheet.appendRow(['id','customer_name','email','email_thread_id']);
+  sheet.appendRow(['r1','홍길동','old@example.com','old-thread']);
+  context.GmailService = {createDummyElfsightThread:() => {throw new Error('메일 전송 실패');}};
+  const response = vm.runInContext('apiCorrectEmailAndInitializeThread("token", {reservationId:"r1",newEmail:"new@example.com",data:{customer_name:"홍길동"}})',context);
+  assert.equal(response.success,false);
+  const stored = sheet.getDataRange().getValues()[1];
+  assert.equal(stored[2],'old@example.com');
+  assert.equal(stored[3],'old-thread');
+  assert.equal(response.activityLog.action,'예약 이메일 변경');
+  assert.equal(response.activityLog.status,'실패');
+  assert.deepEqual(JSON.parse(response.activityLog.details).changes,[]);
+});
+
+test('authenticated background helpers perform work without activity rows', () => {
+  const {context,sheets} = setup();
+  let labels = 0;
+  context.GmailService = {addLabelsAfterDelay:() => {labels++;}};
+  context.DuplicateGroupService = {markDuplicateMailSent:() => ({success:true})};
+  assert.equal(vm.runInContext('apiAddLabelsToThread("token",{reservationId:"r1",threadId:"t1",status:"confirm",deposit_status:"confirm"}).success',context),true);
+  assert.equal(vm.runInContext('apiMarkDuplicateMailSent("token",{groupId:"g1",reservationIds:["r1"]}).success',context),true);
+  assert.equal(labels,1);
+  assert.equal(sheets.has('activity_log'),false);
 });

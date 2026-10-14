@@ -28,102 +28,40 @@ const ActivityLogService = {
     return (name || '예약') + (email ? ' (' + email + ')' : '');
   },
 
-  describe(apiName, params, resultData) {
-    const p = params || {};
-    const data = p.data || p;
-    const result = resultData || {};
-    const reservationId = p.targetReservationId || p.reservationId || p.id || data.reservationId || data.id;
-    const reservation = () => this.reservationTarget(reservationId, data.customer_name || data.customerName, p.newEmail !== undefined ? p.newEmail : data.email);
-    const status = { pending: '대기', confirm: '확정', cancel: '취소', refund: '환불', 'n/a': '해당 없음' };
-    const changes = {
-      customer_name: '고객명', email: '이메일', phone_number: '연락처', branch_id: '지점',
-      reservation_date: '방문 일시', visit_date: '방문 날짜', visit_time: '방문 시간',
-      pax: '인원', status: '예약 상태', deposit_status: '예약금 상태',
-      deposit_amount: '예약금', notes: '고객 메모', internal_notes: '관리자 메모', private_notes: '비공개 메모'
-    };
-    const formatValue = (key, value) => {
-      if (value == null || value === '') return '';
-      if (key === 'status' || key === 'deposit_status') return status[value] || String(value);
-      if (key === 'reservation_date') return Utilities.formatDate(new Date(value), 'Asia/Seoul', 'yyyy-MM-dd HH:mm');
-      const text = String(value);
-      return text.length > 1500 ? text.slice(0, 1500) + '…' : text;
-    };
-    // 요청 JSON의 키 순서와 관계없이 이 순서 그대로 로그 JSON에 저장한다.
-    const changedFields = new Map((result.activityChanges || []).map(change => [change.field, change]));
-    const fieldChanges = Object.keys(changes).filter(key => changedFields.has(key)).map(key => changedFields.get(key)).map(change => ({
-      field: changes[change.field],
-      before: formatValue(change.field, change.before), after: formatValue(change.field, change.after)
-    }));
-    // 셀 한도 안에서도 JSON 구조를 유지한다. 생략된 값에는 표시를 남긴다.
-    while (JSON.stringify({ changes: fieldChanges }).length > 45000) {
-      fieldChanges.forEach(change => {
-        ['before', 'after'].forEach(key => {
-          if (change[key].length > 100) change[key] = change[key].slice(0, Math.floor(change[key].length / 2)) + '…';
-        });
-      });
+  describe(apiName, params, resultData, before) {
+    const p = params || {}, data = p.data || p, result = resultData || {};
+    let action = ActivityAudit.ACTIONS[apiName];
+    let type = 'reservation', id = p.targetReservationId || p.reservationId || p.id || data.id;
+    if (apiName.startsWith('apiSaveSystemSettings:') || apiName.startsWith('apiDeleteSystemData:')) {
+      const setting = apiName.split(':')[1];
+      type = setting.startsWith('slot_') ? 'branch' : setting;
+      id = setting.startsWith('slot_') ? data.branch_id : data.id || p.id || result.id;
+      const names = {user:data.id ? '사용자 정보 변경':'사용자 등록',branch:data.id ? '지점 정보 변경':'지점 등록',
+        mail_template:data.id ? '메일 템플릿 변경':'메일 템플릿 생성',slot_override:'개별 슬롯 변경',slot_batch:'기본 슬롯 일괄 변경',slot_override_batch:'커스텀 슬롯 일괄 변경'};
+      action = apiName.startsWith('apiDelete') ? setting === 'user' ? '사용자 비활성화' : '메일 템플릿 삭제' : names[setting];
     }
-    const labels = {
-      apiUpdateReservationMessageSentAt: '알림톡 발송 완료 처리',
-      webhookMessageSentAt: '알림톡 발송 시각 갱신',
-      apiSendTemplatedMail: '안내 메일 발송',
-      apiInitializeMailThread: '예약 확인 메일 발송',
-      apiCorrectEmailAndInitializeThread: '이메일 수정 및 확인 메일 발송',
-      apiAddLabelsToThread: '메일 라벨 동기화',
-      apiMarkReservationAsRead: '예약 읽음 처리',
-      apiCreateManualDuplicateGroup: '중복 예약 수동 묶기',
-      apiClearDuplicateGroup: '중복 아님 처리',
-      apiRemoveManualDuplicateGroup: '수동 묶음 해제',
-      apiExcludeReservationFromGroup: '중복 묶음에서 예약 제외',
-      apiMarkDuplicateMailSent: '중복 확인 메일 기록',
-      apiSendDuplicateConfirmationMail: '중복 확인 메일 발송',
-      apiRunSchemaMigration: '시트 구조 갱신',
-      apiBackfillDuplicateGroups: '중복 예약 이력 보정'
-    };
-    if (apiName === 'apiUpdateReservation') return ['예약 정보 수정', reservation(), result.activityChanges ? JSON.stringify({ changes: fieldChanges }) : '변경 내역 확인 불가', 'reservation', reservationId];
-    if (apiName === 'apiUpdateReservationStatus') return ['예약 상태 변경', reservation(), result.activityChanges ? JSON.stringify({ changes: fieldChanges }) : status[p.status] || String(p.status || ''), 'reservation', reservationId];
-    if (apiName === 'apiUpdateDepositStatus') return ['예약금 상태 변경', reservation(), result.activityChanges ? JSON.stringify({ changes: fieldChanges }) : status[p.status] || String(p.status || ''), 'reservation', reservationId];
-    if (apiName.startsWith('apiSaveSystemSettings:')) {
-      const type = apiName.split(':')[1];
-      const actions = { user: '사용자 정보 저장', branch: '지점 정보 저장', mail_template: '메일 템플릿 저장', slot_override: '개별 슬롯 저장', slot_batch: '기본 슬롯 일괄 저장', slot_override_batch: '커스텀 슬롯 일괄 저장' };
-      const id = data.id || result.id;
-      const target = type === 'user' ? this.target(id, data.user_name || data.user_email, '사용자') :
-        type === 'mail_template' ? this.target(id, data.template_name, '메일 템플릿') :
-        type === 'branch' ? this.target(id || data.branch_id, data.branch_name_ko, '지점') :
-        this.target(data.branch_id, data.branch_name_ko, '지점');
-      const role = { admin: '관리자', manager: '매니저', viewer: '조회자' };
-      let slotMaster = '';
-      if (type === 'slot_override' && data.slot_master_id) {
-        slotMaster = '슬롯 ID ' + data.slot_master_id;
-        try {
-          const time = SlotService.getSlotTime(data.slot_master_id);
-          if (time) slotMaster += ' (' + time + ')';
-        } catch (err) {
-          console.warn('[ActivityLog] 슬롯 시간 조회 실패: ' + err.message);
-        }
-      }
-      const details = type === 'user'
-        ? [role[data.role] || '', data.enabled === false ? '비활성' : '', Array.isArray(data.branch_ids) ? '허용 지점 ' + data.branch_ids.length + '개' : ''].filter(Boolean).join(', ')
-        : type.startsWith('slot_') ? [data.date, slotMaster, data.slot !== undefined ? '슬롯 ' + data.slot : '', data.payload ? Object.keys(data.payload).length + '개 시간대' : ''].filter(Boolean).join(', ') : '';
-      const targetType = type.startsWith('slot_') ? 'branch' : type;
-      const targetId = type.startsWith('slot_') ? data.branch_id : id || data.branch_id;
-      return [actions[type] || '설정 저장', target || '설정', details, targetType, targetId];
+    if (['apiCreateManualDuplicateGroup','apiClearDuplicateGroup','apiSendDuplicateConfirmationMail'].includes(apiName)) {
+      type = 'duplicate_group'; id = p.groupId || result.group_id || result.groupId;
     }
-    if (apiName.startsWith('apiDeleteSystemData:')) {
-      const type = apiName.split(':')[1];
-      return [type === 'user' ? '사용자 비활성화' : '메일 템플릿 삭제', p.id || '대상', '', type, p.id];
+    if (apiName === 'apiExcludeReservationFromGroup') {type = 'reservation'; id = p.reservationId;}
+    let target = type === 'reservation' ? this.reservationTarget(id,data.customer_name || data.customerName,p.newEmail !== undefined ? p.newEmail : data.email) : '';
+    const old = before?.rows[0] || {};
+    if (type === 'user') target = data.user_name || data.user_email || old.user_name || old.user_email || '사용자';
+    if (type === 'branch') target = data.branch_name_ko || old.branch_name_ko || '지점';
+    if (type === 'mail_template') target = data.template_name || old.template_name || '메일 템플릿';
+    if (type === 'duplicate_group') target = '중복 예약 그룹';
+    const details = ActivityAudit.details(apiName,p,before,result);
+    // 셀 한도 내에서 JSON 구조를 보존하고 긴 본문에 생략 표시를 남긴다.
+    const shorten = value => typeof value === 'string' && value.length > 1500 ? value.slice(0,1500) + '…' : value;
+    details.changes.forEach(change => {change.before = shorten(change.before); change.after = shorten(change.after);});
+    while (JSON.stringify(details).length > 45000) {
+      let reduced = false;
+      details.changes.forEach(change => ['before','after'].forEach(key => {
+        if (typeof change[key] === 'string' && change[key].length > 100) {change[key] = change[key].slice(0,Math.floor(change[key].length / 2)) + '…'; reduced = true;}
+      }));
+      if (!reduced) throw new Error('변경 내역이 로그 셀 한도를 초과했습니다.');
     }
-    if (apiName === 'apiSendDuplicateConfirmationMail') {
-      return [labels[apiName], reservation(), '', 'reservation', reservationId];
-    }
-    const groupId = p.groupId || result.group_id || result.groupId;
-    const target = apiName === 'apiSendTemplatedMail'
-      ? p.reservationId ? reservation() : this.target(p.threadId, data.customer_name || data.customerName, '메일')
-      : groupId ? this.target(groupId, '', '중복 그룹')
-        : p.reservationId || p.id ? reservation()
-          : p.threadId ? this.target(p.threadId, '', '메일') : '시스템';
-    const targetType = groupId ? 'duplicate_group' : p.reservationId || p.id ? 'reservation' : p.threadId ? 'mail_thread' : '';
-    const targetId = groupId || p.reservationId || p.id || p.threadId || '';
-    return [labels[apiName] || '작업 처리', target, '', targetType, targetId];
+    return [action,target,JSON.stringify(details),type,id];
   },
 
   ensureSheetLayout(sheet) {
@@ -150,8 +88,9 @@ const ActivityLogService = {
     return { headers, missing, reordered };
   },
 
-  record(apiName, actor, params, success, resultData) {
-    const summary = this.describe(apiName, params, resultData);
+  record(apiName, actor, params, success, resultData, before = null) {
+    if (!ActivityAudit.shouldRecord(apiName)) return null;
+    const summary = this.describe(apiName, params, resultData, before);
     const sheetName = Config.SHEET_NAMES.ACTIVITY_LOG;
     const lock = LockService.getScriptLock();
     lock.waitLock(20000);
