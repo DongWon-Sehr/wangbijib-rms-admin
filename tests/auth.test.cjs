@@ -47,6 +47,7 @@ function setup() {
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('src/UserService.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('src/ActivityAudit.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('src/WebApi.js', 'utf8'), context);
   return { context, entries, properties, calls, users, setProfileEmail: x => { profileEmail = x; } };
 }
@@ -160,6 +161,7 @@ function setupBrowserAuth({ callback = null, oauthState = null } = {}) {
   const calls = [];
   const errors = [];
   const mounted = [];
+  const intervals = [];
   const responses = {
     apiCheckSession: { success: true, data: { role: 'admin', allowedBranchIds: ['all'] } },
     apiBeginGoogleLogin: { success: true, data: { state: 'new-state', url: 'https://accounts.google.com/login' } },
@@ -174,7 +176,7 @@ function setupBrowserAuth({ callback = null, oauthState = null } = {}) {
     document: { getElementById: () => ({ dataset: {} }), addEventListener() {} },
     window: { WANG_OAUTH_RESULT: callback, addEventListener() {} },
     alert: message => errors.push(message),
-    setInterval: () => 1,
+    setInterval: (callback, duration) => { intervals.push({ callback, duration }); return intervals.length; },
     clearInterval() {},
     setTimeout: () => 1,
     clearTimeout() {},
@@ -200,7 +202,7 @@ function setupBrowserAuth({ callback = null, oauthState = null } = {}) {
             return (...args) => {
               calls.push({ name, args });
               const response = Object.hasOwn(responses, name) ? responses[name] : { success: true, data: [] };
-              queueMicrotask(() => response instanceof Error ? failure(response) : success(response));
+              queueMicrotask(() => response instanceof Error ? failure(response) : response && typeof response.then === "function" ? response.then(success, failure) : success(response));
             };
           }
         });
@@ -212,7 +214,7 @@ function setupBrowserAuth({ callback = null, oauthState = null } = {}) {
   const source = fs.readFileSync('src/javascript.html', 'utf8').replace(/^<script>\s*/, '').replace(/<\/script>\s*$/, '');
   vm.runInContext(source, context);
   return {
-    state, savedToken, localValues, sessionValues, calls, responses, errors,
+    state, savedToken, localValues, sessionValues, calls, responses, errors, intervals,
     async start() {
       mounted.forEach(hook => hook());
       await new Promise(resolve => setImmediate(resolve));
@@ -289,4 +291,440 @@ test('explicit logout revokes the session and clears only the app browser storag
   assert.equal(browser.state.appState.value, 'login');
   assert.equal(browser.state.currentUser.value, null);
   assert.equal(browser.calls.find(call => call.name === 'apiLogout').args[0], browser.savedToken);
+});
+
+
+test('60-second sync refreshes reservation, settings, and logs in reactive memory', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.reservations.value = [{id:'r1',is_read:true}];
+  const datasets = {
+    apiGetBranches: ['new-branch'], apiGetReservations: [{id:'r1',is_read:false}],
+    apiGetSlotMasters:['new-master'], apiGetSlotDefaults:['new-default'], apiGetSlotOverrides:['new-override'],
+    apiGetMailTemplates:['new-template'], apiGetDuplicateGroups:['new-group'], apiGetBouncedEmails:['new-bounce'],
+    apiGetUsers:['new-user'], apiGetActivityLogs:{rows:[{id:'new-log'}],targetTypes:['reservation']}
+  };
+  for (const [name,data] of Object.entries(datasets)) browser.responses[name] = {success:true,data};
+  browser.calls.length = 0;
+  browser.state.syncCountdown.value = 1;
+  await browser.intervals.find(interval => interval.duration === 1000).callback();
+  assert.deepEqual(browser.calls.map(call => call.name).sort(),Object.keys(datasets).sort());
+  for (const [stateKey,api] of Object.entries({branches:'apiGetBranches',slotMasters:'apiGetSlotMasters',slotDefaults:'apiGetSlotDefaults',slotOverrides:'apiGetSlotOverrides',mailTemplates:'apiGetMailTemplates',duplicateGroupsData:'apiGetDuplicateGroups',users:'apiGetUsers'})) {
+    assert.deepEqual([...browser.state[stateKey].value],datasets[api]);
+  }
+  assert.equal(browser.state.reservations.value[0].is_read,true);
+  assert.equal(browser.state.activityLogs.value[0].id,'new-log');
+  assert.deepEqual([...browser.state.activityTargetTypes.value],['reservation']);
+  assert.equal(browser.state.isSyncing.value,false);
+  assert.equal(browser.state.isLoading.value,false);
+  assert.equal(browser.state.syncCountdown.value,60);
+});
+
+test('background sync skips open settings and preserves cached data on fetch failure', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  const tick = browser.intervals.find(interval => interval.duration === 1000).callback;
+  browser.calls.length = 0;
+  browser.state.syncCountdown.value = 1;
+  browser.state.modalState.system = true;
+  await tick();
+  assert.equal(browser.calls.length,0);
+  assert.equal(browser.state.syncCountdown.value,1);
+  browser.state.modalState.system = false;
+  browser.state.branches.value = ['cached-branch'];
+  browser.state.activityLogs.value = [{id:'cached-log'}];
+  browser.responses.apiGetMailTemplates = new Error('network failure');
+  await tick();
+  assert.deepEqual([...browser.state.branches.value],['cached-branch']);
+  assert.equal(browser.state.activityLogs.value[0].id,'cached-log');
+  assert.equal(browser.state.isSyncing.value,false);
+});
+
+test('manager background sync omits administrator users and logs', async () => {
+  const browser = setupBrowserAuth();
+  browser.responses.apiCheckSession.data.role = 'manager';
+  await browser.start();
+  browser.calls.length = 0;
+  browser.state.syncCountdown.value = 1;
+  await browser.intervals.find(interval => interval.duration === 1000).callback();
+  assert.equal(browser.calls.length,8);
+  assert.equal(browser.calls.some(call => ['apiGetUsers','apiGetActivityLogs'].includes(call.name)),false);
+});
+
+
+function deferredResponse() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return {promise,resolve};
+}
+
+test('settings and log memory update before acknowledgement and reconcile generated IDs', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  const deferred = deferredResponse();
+  browser.responses.apiSaveSystemSettings = deferred.promise;
+  const pending = browser.state.runGoogleScript('apiSaveSystemSettings','mail_template',{template_name:'새 안내',body_html:'내용'});
+  assert.equal(browser.state.mailTemplates.value[0].template_name,'새 안내');
+  const provisional = browser.state.activityLogs.value[0];
+  assert.equal(provisional.action,'메일 템플릿 생성');
+  assert.equal(provisional.status,'처리 중');
+  deferred.resolve({success:true,data:{id:'template-created'},activityLog:{id:'server-log',target_type:'mail_template',target_id:'template-created',status:'완료'}});
+  await pending;
+  assert.equal(browser.state.mailTemplates.value[0].id,'template-created');
+  assert.equal(browser.state.mailTemplates.value[0]._optimisticRequestId,undefined);
+  assert.equal(browser.state.activityLogs.value.length,1);
+  assert.equal(browser.state.activityLogs.value[0].id,'server-log');
+  assert.equal(browser.state.activityLogs.value[0].status,'완료');
+});
+
+test('failed settings save restores the prior row and replaces the pending log with a failure', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.branches.value = [{id:'b1',branch_name_ko:'기존 지점'}];
+  const deferred = deferredResponse();
+  browser.responses.apiSaveSystemSettings = deferred.promise;
+  const pending = browser.state.runGoogleScript('apiSaveSystemSettings','branch',{id:'b1',branch_name_ko:'수정 지점'});
+  assert.equal(browser.state.branches.value[0].branch_name_ko,'수정 지점');
+  assert.equal(browser.state.activityLogs.value[0].status,'처리 중');
+  deferred.resolve({success:false,message:'저장 실패',activityLog:{id:'failed-log',target_type:'branch',status:'실패'}});
+  await assert.rejects(pending,/저장 실패/);
+  assert.equal(browser.state.branches.value[0].branch_name_ko,'기존 지점');
+  assert.equal(browser.state.activityLogs.value.length,1);
+  assert.equal(browser.state.activityLogs.value[0].status,'실패');
+});
+
+test('failed optimistic template deletion restores the row and removes the provisional log on network failure', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.mailTemplates.value = [{id:'t1',template_name:'기존 안내'}];
+  const deferred = deferredResponse();
+  browser.responses.apiDeleteSystemData = deferred.promise;
+  const pending = browser.state.runGoogleScript('apiDeleteSystemData','mail_template','t1');
+  assert.equal(browser.state.mailTemplates.value.length,0);
+  assert.equal(browser.state.activityLogs.value[0].status,'처리 중');
+  deferred.resolve(null);
+  await assert.rejects(pending,/서버 응답/);
+  assert.equal(browser.state.mailTemplates.value[0].id,'t1');
+  assert.equal(browser.state.activityLogs.value.length,0);
+});
+
+test('in-flight periodic sync discards stale settings and logs after a mutation', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.branches.value = [{id:'b1',branch_name_ko:'기존 지점'}];
+  const deferred = deferredResponse();
+  browser.responses.apiGetBranches = deferred.promise;
+  browser.state.syncCountdown.value = 1;
+  const tick = browser.intervals.find(interval => interval.duration === 1000).callback;
+  const sync = tick();
+  browser.responses.apiSaveSystemSettings = {success:true,activityLog:{id:'new-log',target_type:'branch',status:'완료'}};
+  await browser.state.runGoogleScript('apiSaveSystemSettings','branch',{id:'b1',branch_name_ko:'수정 지점'});
+  deferred.resolve({success:true,data:[{id:'b1',branch_name_ko:'오래된 지점'}]});
+  await sync;
+  assert.equal(browser.state.branches.value[0].branch_name_ko,'수정 지점');
+  assert.equal(browser.state.activityLogs.value[0].id,'new-log');
+  assert.equal(browser.state.isSyncing.value,false);
+});
+
+
+test('user settings optimistic update includes permissions and rollback on failure', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.users.value = [{id:'u1',user_name:'기존 사용자',branch_ids:['b1'],enabled:true}];
+  browser.state.activeSystemData.value = {type:'user',mode:'edit'};
+  browser.state.localData.value = {id:'u1',user_name:'수정 사용자',enabled:false};
+  browser.state.modalState.system = true;
+  browser.state.userBranchIds.value = ['b2'];
+  const deferred = deferredResponse();
+  browser.responses.apiSaveSystemSettings = deferred.promise;
+  const saving = browser.state.handleSystemSave();
+  assert.equal(browser.state.users.value[0].user_name,'수정 사용자');
+  assert.equal(browser.state.modalState.system,false);
+  assert.equal(browser.state.isModalLoading.value,false);
+  assert.deepEqual([...browser.state.users.value[0].branch_ids],['b2']);
+  assert.equal(browser.state.users.value[0].enabled,false);
+  assert.equal(browser.state.activityLogs.value[0].status,'처리 중');
+  deferred.resolve({success:false,message:'저장 실패'});
+  await saving;
+  assert.equal(browser.state.users.value[0].user_name,'기존 사용자');
+  assert.deepEqual([...browser.state.users.value[0].branch_ids],['b1']);
+  assert.equal(browser.state.users.value[0].enabled,true);
+  assert.equal(browser.state.activityLogs.value.length,0);
+});
+
+test('slot settings and activity log update immediately and rollback together', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.slotDefaults.value = [{branch_id:'b1',slot_master_id:'s1',slot:5,enabled:true}];
+  browser.state.activeSystemData.value = {type:'slot',mode:'batch',batchType:'default',data:{branch_id:'b1'}};
+  browser.state.slotBatchPayload.masterSlots = [{id:'s1',slot:2,enabled:false}];
+  const deferred = deferredResponse();
+  browser.responses.apiSaveSystemSettings = deferred.promise;
+  await browser.state.handleSystemSave();
+  assert.equal(browser.state.slotDefaults.value[0].slot,2);
+  assert.equal(browser.state.slotDefaults.value[0].enabled,false);
+  assert.equal(browser.state.activityLogs.value[0].status,'처리 중');
+  deferred.resolve({success:false,message:'저장 실패'});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(browser.state.slotDefaults.value[0].slot,5);
+  assert.equal(browser.state.slotDefaults.value[0].enabled,true);
+  assert.equal(browser.state.activityLogs.value.length,0);
+});
+
+
+test('activity UI resolves IDs to names while stored JSON and target ID stay unchanged', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.branches.value = [{id:'b1',branch_name_ko:'명동점'},{id:'b2',branch_name_ko:'종로점'}];
+  browser.state.users.value = [{id:'u1',user_name:'김매니저'}];
+  browser.state.mailTemplates.value = [{id:'t1',template_name:'예약 안내'}];
+  browser.state.reservations.value = [{id:'r1',customer_name:'홍길동',email_thread_id:'thread1'}];
+  browser.state.slotMasters.value = [{id:'s1',time:'2026-10-14T09:00:00Z'}];
+  browser.state.duplicateGroupsData.value = [{group_id:'20261014_01',reservation_ids:'r1'}];
+  const log = {id:'log1',timestamp:'2026-10-14T00:00:00Z',status:'완료',target_type:'reservation',target_id:'r1',target:'홍길동',
+    details:JSON.stringify({changes:[{field:'지점',before:'b1',after:'b2'},{field:'role',before:'manager',after:'admin'},{field:'notes',before:'b1',after:'b2'}]})};
+  const original = log.details;
+  const changes = browser.state.activityChanges(log);
+  assert.equal(changes[0].before,'명동점');
+  assert.equal(changes[0].after,'종로점');
+  assert.equal(changes[1].field,'권한');
+  assert.equal(changes[1].before,'매니저');
+  assert.equal(changes[1].after,'관리자');
+  assert.equal(changes[2].before,'b1'); // 자유 입력값은 식별자로 추측하지 않는다.
+  assert.equal(log.details,original);
+  assert.equal(log.target_id,'r1');
+  for (const [type,id,name] of [['branch','b1','명동점'],['user','u1','김매니저'],['mail_template','t1','예약 안내'],['mail_thread','thread1','홍길동 메일'],['duplicate_group','20261014_01','홍길동 중복 예약']]) {
+    assert.equal(browser.state.activityTarget({target_type:type,target_id:id,target:id}),name);
+  }
+  assert.equal(browser.state.activityTarget({target_type:'mail_template',target_id:'deleted',target:'deleted (기존 템플릿)'}),'기존 템플릿');
+  assert.equal(browser.state.activityTarget({target_type:'branch',target_id:'deleted',target:'deleted'}),'지점 정보 없음');
+  assert.equal(browser.state.activityDetails({details:'2026-10-14, 슬롯 ID s1 (18:00), 슬롯 3'}),'2026-10-14, 슬롯 시간 18:00, 슬롯 3');
+  assert.equal(browser.state.activityDetails({details:'슬롯 ID s1'}),'슬롯 시간 18:00');
+  browser.state.activityLogs.value = [log];
+  browser.state.activityDateStart.value = '2026-10-14';
+  browser.state.activityDateEnd.value = '2026-10-14';
+  browser.state.activitySearch.value = '종로점';
+  assert.equal(browser.state.filteredActivityLogs.value.length,1);
+});
+
+
+test('activity tab navigation uses cached logs and GNB manual refresh fetches all datasets', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.activityLogs.value = [{id:'cached-log'}];
+  browser.calls.length = 0;
+  browser.state.setCurrentView('activity');
+  browser.state.setCurrentView('list');
+  browser.state.setCurrentViewAndCloseMenu('activity');
+  assert.equal(browser.calls.length,0);
+  assert.equal(browser.state.activityLogs.value[0].id,'cached-log');
+  browser.responses.apiGetActivityLogs = {success:true,data:{rows:[{id:'refreshed-log'}],targetTypes:['reservation']}};
+  await browser.state.handleManualRefresh();
+  assert.equal(browser.calls.length,10);
+  assert.equal(browser.state.activityLogs.value[0].id,'refreshed-log');
+  assert.equal(browser.state.isSyncing.value,false);
+  assert.doesNotMatch(fs.readFileSync('src/LayoutHeader.html','utf8'),/refreshActivityLogs/);
+});
+
+
+test('optimistic reservation log shows name and email before the server responds', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.reservations.value = [{id:'r1',customer_name:'홍길동',email:'customer@example.com'}];
+  const deferred = deferredResponse();
+  browser.responses.apiUpdateReservationStatus = deferred.promise;
+  const pending = browser.state.runGoogleScript('apiUpdateReservationStatus','r1','confirm');
+  assert.equal(browser.state.activityLogs.value[0].target,'홍길동 (customer@example.com)');
+  assert.equal(browser.state.activityTarget(browser.state.activityLogs.value[0]),'홍길동 (customer@example.com)');
+  deferred.resolve({success:true});
+  await pending;
+});
+
+test('new branch appears optimistically with a temporary ID, reconciles or rolls back', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.activeSystemData.value = {type:'branch',mode:'create'};
+  const branch = {branch_name_ko:'신규점',branch_name_en:'New Branch',calendar_id:'new-calendar',enabled:true};
+  browser.state.localData.value = {...branch};
+  const deferred = deferredResponse();
+  browser.responses.apiSaveSystemSettings = deferred.promise;
+  browser.responses.apiGetBranches = {success:true,data:[{...branch,id:'new-id'}]};
+  browser.responses.apiGetActivityLogs = {success:true,data:{rows:[{id:'new-log',action:'지점 등록',target_type:'branch',target_id:'new-id'}],targetTypes:['branch']}};
+  const saving = browser.state.handleSystemSave();
+  assert.equal(browser.state.branches.value[0].branch_name_ko,'신규점');
+  assert.match(browser.state.branches.value[0].id,/^optimistic-/);
+  assert.equal(browser.state.activityLogs.value[0].action,'지점 등록');
+  deferred.resolve({success:true,data:{...branch,id:'new-id'},activityLog:{id:'new-log',action:'지점 등록',target_type:'branch',target_id:'new-id'}});
+  await saving;
+  assert.equal(browser.state.branches.value[0].id,'new-id');
+  assert.equal(browser.state.branchMapKo.value['new-id'],'신규점');
+  assert.equal(browser.state.activityLogs.value[0].id,'new-log');
+  browser.state.activeSystemData.value = {type:'branch',mode:'create'};
+  browser.state.localData.value = {...branch,branch_name_ko:'실패점',branch_name_en:'Other',calendar_id:'other-calendar'};
+  const failed = deferredResponse();
+  browser.responses.apiSaveSystemSettings = failed.promise;
+  const failing = browser.state.handleSystemSave();
+  assert.equal(browser.state.branches.value.length,2);
+  failed.resolve({success:false,message:'등록 실패'});
+  await failing;
+  assert.equal(browser.state.branches.value.length,1);
+  assert.equal(browser.state.branches.value[0].id,'new-id');
+});
+
+
+test('user save closes immediately and acknowledgement avoids full reload or closing a newer modal', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.users.value = [{id:'u1',user_name:'기존 사용자',branch_ids:['b1'],enabled:true}];
+  browser.state.activeSystemData.value = {type:'user',mode:'edit'};
+  browser.state.modalState.system = true;
+  browser.state.localData.value = {id:'u1',user_name:'수정 사용자',enabled:true};
+  browser.state.userBranchIds.value = ['b2'];
+  browser.calls.length = 0;
+  const deferred = deferredResponse();
+  browser.responses.apiSaveSystemSettings = deferred.promise;
+  const saving = browser.state.handleSystemSave();
+  assert.equal(browser.state.modalState.system,false);
+  assert.equal(browser.state.isModalLoading.value,false);
+  assert.equal(browser.state.isLoading.value,false);
+  assert.equal(browser.state.users.value[0].user_name,'수정 사용자');
+  browser.state.activeSystemData.value = {type:'user',mode:'edit',data:{id:'u2'}};
+  browser.state.modalState.system = true;
+  deferred.resolve({success:true});
+  await saving;
+  assert.deepEqual(browser.calls.map(call => call.name),['apiSaveSystemSettings','apiCheckSession']);
+  assert.equal(browser.state.users.value[0].user_name,'수정 사용자');
+  assert.equal(browser.state.modalState.system,true);
+  assert.equal(browser.state.activeSystemData.value.data.id,'u2');
+});
+
+test('manual and automatic duplicate groups share full and individual exclusion with rollback', async t => {
+  for (const groupType of ['manual','auto']) {
+    for (const individual of [false,true]) {
+      await t.test(groupType + (individual ? ' individual' : ' full'), async () => {
+        const browser = setupBrowserAuth();
+        await browser.start();
+        const reservations = ['r1','r2','r3'].map(id => ({id,customer_name:'홍길동',email:'same@example.com',status:'pending',reservation_date:'2026-10-20T09:00:00Z'}));
+        browser.state.reservations.value = reservations;
+        const group = {id:'g1',group_id:'g1',group_type:groupType,status:'active',reservation_ids:['r1','r2','r3'],parsed_ids:['r1','r2','r3']};
+        browser.state.duplicateGroupsData.value = [group];
+        const displayed = browser.state.duplicateGroups.value[0];
+        assert.equal(displayed.reservations.length,3);
+        const deferred = deferredResponse();
+        const api = individual ? 'apiExcludeReservationFromGroup' : 'apiClearDuplicateGroup';
+        browser.responses[api] = deferred.promise;
+        const pending = individual ? browser.state.excludeSingleReservationFromGroup(reservations[2],displayed) : browser.state.clearDuplicateGroup(displayed);
+        browser.state.handleAlertResult(true);
+        await Promise.resolve();
+        if (individual) {
+          assert.deepEqual([...browser.state.duplicateGroups.value[0].reservations].map(res => res.id),['r1','r2']);
+          assert.equal(browser.state.duplicateGroupsData.value.find(row => row.id === 'cleared_r3').status,'cleared');
+        } else {
+          assert.equal(browser.state.duplicateGroups.value.length,0);
+          assert.equal(browser.state.duplicateGroupsData.value[0].status,'cleared');
+        }
+        assert.equal(browser.state.activityLogs.value.at(-1).action,individual ? '중복 해제' : '중복 일괄 해제');
+        deferred.resolve({success:false,message:'제외 실패'});
+        await pending;
+        assert.equal(browser.state.duplicateGroups.value[0].reservations.length,3);
+        assert.equal(browser.state.duplicateGroupsData.value.length,1);
+        assert.equal(browser.state.duplicateGroupsData.value[0].group_type,groupType);
+      });
+    }
+  }
+});
+
+test('read marking and email correction update immediately and restore values on RPC failure', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  const reservation = {id:'r1',customer_name:'홍길동',email:'old@example.com',email_thread_id:'old-thread',is_read:false};
+  browser.state.reservations.value = [reservation];
+  const read = deferredResponse();
+  browser.responses.apiMarkReservationAsRead = read.promise;
+  browser.state.markAsReadOnClick(reservation);
+  assert.equal(reservation.is_read,true);
+  assert.equal(JSON.parse(browser.state.activityLogs.value[0].details).changes[0].key,'is_read');
+  read.resolve({success:false,message:'읽음 저장 실패'});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reservation.is_read,false);
+  browser.state.bouncedEmailsData.value = [{threadId:'old-thread',recipientEmail:'old@example.com'},{recipientEmail:'another@example.com'}];
+  const correcting = deferredResponse();
+  browser.responses.apiCorrectEmailAndInitializeThread = correcting.promise;
+  const pending = browser.state.runGoogleScript('apiCorrectEmailAndInitializeThread',{reservationId:'r1',newEmail:'new@example.com'});
+  assert.equal(reservation.email,'new@example.com');
+  assert.equal(reservation.mail_pending,true);
+  assert.equal(browser.state.bouncedEmailsData.value.length,1);
+  assert.equal(JSON.parse(browser.state.activityLogs.value.at(-1).details).changes[0].before,'old@example.com');
+  correcting.resolve({success:false,message:'발송 실패'});
+  await assert.rejects(pending,/발송 실패/);
+  assert.equal(reservation.email,'old@example.com');
+  assert.equal(reservation.email_thread_id,'old-thread');
+  assert.equal(reservation.mail_pending,undefined);
+  assert.equal(browser.state.bouncedEmailsData.value.length,2);
+});
+
+test('manual group creation is visible before acknowledgement and removes only its provisional group on failure', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.reservations.value = ['r1','r2'].map(id => ({id,customer_name:'홍길동',email:'same@example.com',status:'pending',reservation_date:'2026-10-20T09:00:00Z'}));
+  const deferred = deferredResponse();
+  browser.responses.apiCreateManualDuplicateGroup = deferred.promise;
+  const pending = browser.state.runGoogleScript('apiCreateManualDuplicateGroup',{reservationIds:['r1','r2']});
+  assert.equal(browser.state.duplicateGroups.value[0].group_type,'manual');
+  assert.equal(browser.state.duplicateGroups.value[0].reservations.length,2);
+  assert.equal(browser.state.activityEntries(browser.state.activityLogs.value[0])[0].value,'r1 - 홍길동 (same@example.com)');
+  browser.state.duplicateGroupsData.value.push({id:'other',group_id:'other',status:'active',group_type:'manual',reservation_ids:['r1','r2']});
+  deferred.resolve({success:false,message:'생성 실패'});
+  await assert.rejects(pending,/생성 실패/);
+  assert.equal(browser.state.duplicateGroupsData.value.length,1);
+  assert.equal(browser.state.duplicateGroupsData.value[0].id,'other');
+});
+
+test('duplicate confirmation mail uses group target and rolls back optimistic sent time', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.reservations.value = [{id:'r1',customer_name:'홍길동',email:'customer@example.com'}];
+  const group = {id:'g1',group_id:'g1',mail_sent_at:'2026-10-01T00:00:00Z'};
+  browser.state.duplicateGroupsData.value = [group];
+  const deferred = deferredResponse();
+  browser.responses.apiSendDuplicateConfirmationMail = deferred.promise;
+  const pending = browser.state.runGoogleScript('apiSendDuplicateConfirmationMail',{groupId:'g1',targetReservationId:'r1',threadId:'thread1'});
+  const log = browser.state.activityLogs.value[0];
+  assert.equal(log.target_id,'g1');
+  assert.equal(log.target_type,'duplicate_group');
+  assert.equal(browser.state.activityEntries(log)[0].value,'r1 - 홍길동 (customer@example.com)');
+  assert.notEqual(group.mail_sent_at,'2026-10-01T00:00:00Z');
+  deferred.resolve({success:false,message:'발송 실패'});
+  await assert.rejects(pending,/발송 실패/);
+  assert.equal(group.mail_sent_at,'2026-10-01T00:00:00Z');
+});
+
+test('branch and mail-template saves close their modal before server acknowledgement', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  browser.state.activeSystemData.value = {type:'branch',mode:'edit'};
+  browser.state.modalState.system = true;
+  browser.state.branches.value = [{id:'b1',branch_name_ko:'명동',branch_name_en:'Myeongdong',calendar_id:'calendar'}];
+  browser.state.localData.value = {...browser.state.branches.value[0],branch_name_ko:'새 지점명'};
+  const branch = deferredResponse();
+  browser.responses.apiSaveSystemSettings = branch.promise;
+  const saving = browser.state.handleSystemSave();
+  assert.equal(browser.state.modalState.system,false);
+  assert.equal(browser.state.branches.value[0].branch_name_ko,'새 지점명');
+  assert.equal(browser.state.isModalLoading.value,false);
+  branch.resolve({success:false,message:'저장 실패'});
+  await saving;
+  assert.equal(browser.state.branches.value[0].branch_name_ko,'명동');
+  browser.state.activeSystemData.value = {type:'mail',mode:'edit'};
+  browser.state.modalState.mail = true;
+  browser.state.mailTemplates.value = [{id:'t1',template_name:'안내',body_html:'기존 본문'}];
+  browser.state.localMailData.value = {id:'t1',template_name:'안내',body_html:'새 본문'};
+  const template = deferredResponse();
+  browser.responses.apiSaveSystemSettings = template.promise;
+  const editing = browser.state.handleMailSave();
+  assert.equal(browser.state.modalState.mail,false);
+  assert.equal(browser.state.mailTemplates.value[0].body_html,'새 본문');
+  template.resolve({success:false,message:'저장 실패'});
+  await editing;
+  assert.equal(browser.state.mailTemplates.value[0].body_html,'기존 본문');
 });

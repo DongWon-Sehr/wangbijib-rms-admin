@@ -262,45 +262,6 @@ const DuplicateGroupService = {
   },
 
   /**
-   * [Action] 수동 그룹 해제 (삭제)
-   * @param {string} groupId
-   */
-  removeManualGroup(groupId) {
-    try {
-      const sheet = this._getSheet();
-      if (!sheet) {
-        throw new Error(`'${Config.SHEET_NAMES.DUPLICATE_GROUP}' 시트가 존재하지 않습니다.`);
-      }
-
-      const allData = sheet.getDataRange().getValues();
-      const grpIdx = allData[0].indexOf('group_id');
-      if (grpIdx === -1) throw new Error('group_id 컬럼 없음');
-
-      const rowsToDelete = [];
-      for (let i = 1; i < allData.length; i++) {
-        if (allData[i][grpIdx] === groupId) {
-          rowsToDelete.push(i + 1);
-        }
-      }
-
-      if (rowsToDelete.length === 0) {
-        return Util.createResponse(false, null, '해당 그룹을 찾을 수 없습니다.');
-      }
-
-      // 역순 삭제
-      for (let k = rowsToDelete.length - 1; k >= 0; k--) {
-        sheet.deleteRow(rowsToDelete[k]);
-      }
-
-      console.log(`[DuplicateGroupService] 수동 그룹 삭제 완료: ${groupId} (${rowsToDelete.length}행 삭제)`);
-      return Util.createResponse(true, null, '수동 그룹이 해제되었습니다.');
-    } catch (e) {
-      console.log(`[DuplicateGroupService] removeManualGroup Error: ${e.message}`);
-      return Util.createResponse(false, null, e.message);
-    }
-  },
-
-  /**
    * [Action] 특정 중복 그룹에서 단일 예약 제외
    * @param {string} groupId
    * @param {string} reservationId

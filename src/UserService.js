@@ -205,7 +205,7 @@ const UserService = {
         this.updatePermissions(newUuid, userData.branch_ids);
       }
 
-      return Util.createResponse(true, newUserObj);
+      return Util.createResponse(true, { ...newUserObj, created_at: now.toISOString(), updated_at: now.toISOString() });
 
     } catch (e) {
       return Util.createResponse(false, null, e.message);

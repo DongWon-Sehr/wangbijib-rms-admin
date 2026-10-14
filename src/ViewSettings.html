@@ -33,16 +33,7 @@
         <i class="ph ph-users-three mr-2"></i> 사용자 관리
       </button>
     </nav>
-    <div class="flex justify-end pt-3">
-      <button
-        type="button"
-        @click="runSchemaMigrationFromSettings"
-        :disabled="isSchemaMigrationRunning"
-        class="w-full sm:w-auto px-3 py-2 text-sm font-semibold text-primary-800 border border-primary-200 rounded-lg hover:bg-primary-50 disabled:opacity-50"
-      >
-        <i class="ph ph-database mr-1"></i>{{ isSchemaMigrationRunning ? '시트 점검 중...' : '시트 구조 점검' }}
-      </button>
-    </div>
+
   </div>
 
   <!-- 탭 콘텐츠 -->
@@ -99,7 +90,13 @@
 
     <!-- 2. 지점 관리 -->
     <div v-else-if="settingsTab === 'branch'" class="space-y-4">
-      <h2 class="text-xl font-bold text-gray-800">지점 관리</h2>
+      <div class="flex justify-between items-center">
+        <h2 class="text-xl font-bold text-gray-800">지점 관리</h2>
+        <button v-if="currentUser && currentUser.role === 'admin'" @click="openBranchModal()"
+          class="px-4 py-2 bg-primary-800 text-white rounded-lg hover:bg-primary-900 transition flex items-center">
+          <i class="ph ph-plus mr-2"></i>지점 추가
+        </button>
+      </div>
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>

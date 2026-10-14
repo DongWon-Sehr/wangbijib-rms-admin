@@ -34,6 +34,47 @@ const BranchService = {
     return branch ? branch.branch_name_en : '';
   },
 
+  /** [Admin] 신규 지점을 등록하고 서버 생성 ID를 반환한다. */
+  createBranch(branchData) {
+    let lock;
+    let locked = false;
+    try {
+      const fields = ['branch_name_ko', 'branch_name_en', 'calendar_id', 'address', 'google_map_link'];
+      const data = Object.fromEntries(fields.map(key => [key, String(branchData[key] || '').trim()]));
+      if (!data.branch_name_ko || !data.branch_name_en || !data.calendar_id) {
+        return Util.createResponse(false, null, '지점명(한글·영문)과 지점 캘린더 ID를 입력해 주세요.');
+      }
+      lock = LockService.getScriptLock();
+      lock.waitLock(20000);
+      locked = true;
+      const sheet = Util.getSpreadsheet().getSheetByName(Config.SHEET_NAMES.BRANCH);
+      if (!sheet) throw new Error('지점 시트를 찾을 수 없습니다.');
+      const rows = sheet.getDataRange().getValues();
+      const headers = rows[0];
+      if (['id', 'branch_name_ko', 'branch_name_en', 'calendar_id', 'enabled'].some(key => !headers.includes(key))) {
+        throw new Error('지점 시트에 필수 컬럼이 없습니다.');
+      }
+      const nameIndex = headers.indexOf('branch_name_en');
+      const calendarIndex = headers.indexOf('calendar_id');
+      if (rows.slice(1).some(row => String(row[nameIndex]).trim().toLowerCase() === data.branch_name_en.toLowerCase())) {
+        throw new Error('이미 등록된 영문 지점명입니다.');
+      }
+      if (rows.slice(1).some(row => String(row[calendarIndex]).trim() === data.calendar_id)) {
+        throw new Error('이미 등록된 지점 캘린더 ID입니다.');
+      }
+      const now = new Date();
+      const branch = { ...data, id: Util.getUuid(), enabled: branchData.enabled !== false,
+        created_at: now, updated_at: now };
+      sheet.appendRow(headers.map(key => branch[key] === undefined ? '' : branch[key]));
+      SpreadsheetApp.flush();
+      return Util.createResponse(true, { ...branch, created_at: now.toISOString(), updated_at: now.toISOString() });
+    } catch (err) {
+      return Util.createResponse(false, null, err.message);
+    } finally {
+      if (locked) lock.releaseLock();
+    }
+  },
+
   /**
    * [Admin] 지점 정보 수정
    */
