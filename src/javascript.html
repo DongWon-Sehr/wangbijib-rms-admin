@@ -221,10 +221,13 @@
       const filterStatus = ref('all');
       const filterDeposit = ref('all');
       const filterBranchIds = ref([]);
+      const isBranchFilterOpen = ref(false);
+      let branchFilterInitialized = false;
       const filterDateType = ref('reservation_date'); 
       const filterDateStart = ref(Util.formatDate(yesterday, 'date')); 
       const filterDateEnd = ref(Util.formatDate(today, 'date'));       
       const filterIssueType = ref('all'); // 'all' | 'duplicate' | 'email_error'
+      const includePastIssues = ref(false);
       const selectedReservationIds = ref([]);
       
       const sortKey = ref('reservation_date');
@@ -384,7 +387,7 @@
       const pullIndicatorHeight = computed(() => isRefreshing.value ? '60px' : Math.min(pullDistance.value, 100) + 'px');
       
       const hasMultiplePages = computed(() => totalPage.value > 1);
-      const hasFilterBranches = computed(() => filterBranchIds.value.length > 0);
+      const selectedBranchFilters = computed(() => filterableBranches.value.filter(b => filterBranchIds.value.includes(b.id)));
       
       const isSlotFull = (branchId, masterId, date) => {
         const val = getSlotValue(branchId, masterId, date);
@@ -970,19 +973,24 @@
       };
 
       // 미래 비취소 예약 중 이메일 오류(오타 또는 반송)가 있는 목록
-      const emailErrorReservations = computed(() => {
-        const list = reservations.value || [];
+      const isUpcomingReservation = (r) => {
         const todayStartMs = new Date().setHours(0, 0, 0, 0);
-        return list.filter(r => {
-          if (r.status === 'cancel') return false;
-          const rDate = new Date(r.reservation_date);
-          if (!isNaN(rDate.getTime()) && rDate.getTime() < todayStartMs) return false;
-          return hasReservationEmailError(r);
-        });
+        const t = new Date(r.reservation_date).getTime();
+        return isNaN(t) || t >= todayStartMs;
+      };
+
+      const emailErrorReservationsAll = computed(() => {
+        const list = reservations.value || [];
+        return list.filter(r => r.status !== 'cancel' && hasReservationEmailError(r));
       });
+      const emailErrorReservations = computed(() => {
+        if (includePastIssues.value) return emailErrorReservationsAll.value;
+        return emailErrorReservationsAll.value.filter(isUpcomingReservation);
+      });
+      const emailErrorCount = computed(() => emailErrorReservationsAll.value.filter(isUpcomingReservation).length);
 
       // --- 중복 예약 그룹화 알고리즘 (Disjoint-Set Connected Components) ---
-      const duplicateGroups = computed(() => {
+      const duplicateGroupsAll = computed(() => {
         const allRes = reservations.value || [];
         const groupsData = duplicateGroupsData.value || [];
         const resMap = {};
@@ -1053,6 +1061,7 @@
               matchLabel: matchReasons.join(', '),
               title: `${validMembers[0]?.customer_name || '고객'} (${validMembers.length}건)`,
               reservations: validMembers,
+              hasUpcoming: validMembers.some(isUpcomingReservation),
               notes: g.notes || '',
               created_at: g.created_at || validMembers[0]?.created_at,
               mail_sent_at: g.mail_sent_at || null
@@ -1070,7 +1079,11 @@
         return finalGroups;
       });
 
-      const duplicateGroupTotalCount = computed(() => duplicateGroups.value.length);
+      const duplicateGroups = computed(() => {
+        if (includePastIssues.value) return duplicateGroupsAll.value;
+        return duplicateGroupsAll.value.filter(g => g.hasUpcoming);
+      });
+      const duplicateGroupTotalCount = computed(() => duplicateGroupsAll.value.filter(g => g.hasUpcoming).length);
       const duplicateGroupMap = computed(() => {
         const map = {};
         duplicateGroups.value.forEach(group => {
@@ -1111,6 +1124,9 @@
           currentPage.value = 1;
         }
       };
+      watch(filterIssueType, (type) => {
+        if (type === 'all') includePastIssues.value = false;
+      });
 
       const notifications = computed(() => {
         const list = [];
@@ -1305,7 +1321,7 @@
           list = list.filter(r => r.status === filterStatus.value);
         }
         if (filterDeposit.value !== 'all') list = list.filter(r => r.deposit_status === filterDeposit.value);
-        if (filterBranchIds.value.length) list = list.filter(r => filterBranchIds.value.includes(r.branch_id));
+        list = list.filter(r => filterBranchIds.value.includes(r.branch_id));
         if (filterIssueType.value === 'email_error') {
           const errIdSet = new Set(emailErrorReservations.value.map(r => r.id));
           list = list.filter(r => errIdSet.has(r.id));
@@ -1468,7 +1484,26 @@
       const sortBy = (k) => { if (sortKey.value === k) sortOrder.value *= -1; else { sortKey.value = k; sortOrder.value = 1; } };
       const toggleBranchFilter = (id) => { const idx = filterBranchIds.value.indexOf(id); if (idx > -1) filterBranchIds.value.splice(idx, 1); else filterBranchIds.value.push(id); };
       const isBranchSelected = (id) => filterBranchIds.value.includes(id);
-      const clearBranchFilters = () => filterBranchIds.value = [];
+      const isAllBranchesSelected = computed(() => filterableBranches.value.length > 0 && selectedBranchFilters.value.length === filterableBranches.value.length);
+      const toggleAllBranchFilters = () => {
+        filterBranchIds.value = isAllBranchesSelected.value ? [] : filterableBranches.value.map(b => b.id);
+      };
+      const toggleBranchFilterDropdown = (e) => {
+        e.stopPropagation();
+        isBranchFilterOpen.value = !isBranchFilterOpen.value;
+        if (isBranchFilterOpen.value) { isProfileDropdownOpen.value = false; isNotificationOpen.value = false; }
+      };
+      // Default to every accessible branch on first load; afterwards only drop branches the user lost access to
+      watch(filterableBranches, (list) => {
+        if (!branchFilterInitialized) {
+          if (list.length === 0) return;
+          filterBranchIds.value = list.map(b => b.id);
+          branchFilterInitialized = true;
+          return;
+        }
+        const ids = new Set(list.map(b => b.id));
+        filterBranchIds.value = filterBranchIds.value.filter(id => ids.has(id));
+      });
       const prevPage = () => { if (currentPage.value > 1) currentPage.value--; };
       const nextPage = () => { if (currentPage.value < totalPage.value) currentPage.value++; };
       const changeSlotDate = (d) => { currentSlotDate.value = Util.formatDate(Util.addDays(new Date(currentSlotDate.value), d), 'date'); };
@@ -2720,6 +2755,8 @@
         } catch (_) {}
         await storageCleanup;
         filterBranchIds.value = [];
+        branchFilterInitialized = false;
+        isBranchFilterOpen.value = false;
         loginError.value = '';
         googleLoginUrl.value = '';
         isProfileDropdownOpen.value = false;
@@ -2881,6 +2918,7 @@
           isProfileDropdownOpen.value = false;
           isNotificationOpen.value = false;
           isStatusDropdownOpen.value = false;
+          isBranchFilterOpen.value = false;
         });
         clockInterval = setInterval(() => {
           now.value = new Date();
@@ -2904,14 +2942,14 @@
         activityTargetType, activityTargetTypes, activityTargetTypeOptions, activityTargetTypeLabels, activitySortKey, activitySortDirection,
         activityChanges, activityTarget, activityDetails, activityEntries, activityScrollElement, filteredActivityLogs,
         toggleActivitySort, activitySortIcon,
-        filterText, filterStatus, filterDeposit, filterBranchIds, filterDateType, filterDateStart, filterDateEnd,
-        filterIssueType, selectedReservationIds,
+        filterText, filterStatus, filterDeposit, filterBranchIds, isBranchFilterOpen, selectedBranchFilters, isAllBranchesSelected, filterDateType, filterDateStart, filterDateEnd,
+        filterIssueType, includePastIssues, selectedReservationIds,
         sortKey, sortOrder, currentPage, itemsPerPage,
         settingsTab, currentSlotDate, selectedSlotBranchId, selectedCalendarBranchId,
         filteredReservations, paginatedReservations, totalPage, branchMapKo, branchMapEn, filterableBranches, slotSettingsBranches, filteredSlotBranches,
         activeCalendarId, calendarIframeSrc, slotMasterMap,
         notifications, notificationCount,
-        emailErrorReservations, duplicateGroups, duplicateGroupTotalCount, duplicateGroupMap, activeReservationDuplicateGroup,
+        emailErrorReservations, emailErrorCount, duplicateGroups, duplicateGroupTotalCount, duplicateGroupMap, activeReservationDuplicateGroup,
         bouncedEmailsData, activeReservationIsBounced, activeReservationEmailError, isBouncedReservation, getReservationEmailError,
         isAllVisibleSelected, toggleSelectAllVisible, toggleIssueFilter,
         validateEmail, hasEmailError, getEmailErrorMsg, getEmailSuggestion, activeReservationEmailSuggestion, applyEmailSuggestion,
@@ -2924,11 +2962,11 @@
         setCurrentView, setCurrentViewAndCloseMenu, toggleProfileDropdown, toggleNotificationDropdown, toggleMobileMenu, 
         runGoogleScript, openModal, closeModal, showCustomAlert, showCustomConfirm, handleAlertResult,
         refreshInitialData, handleManualRefresh, formatDate: Util.formatDate,
-        getBranchName, getDepositStatusLabel, getDepositBadgeClass, sortBy, toggleBranchFilter, isBranchSelected, clearBranchFilters,
+        getBranchName, getDepositStatusLabel, getDepositBadgeClass, sortBy, toggleBranchFilter, isBranchSelected, toggleAllBranchFilters, toggleBranchFilterDropdown,
         handleInlineStatusChange, sendKakao, confirmKakao, markAsReadOnClick,
         prevPage, nextPage, getUserRoleBadge, confirmDeleteUser, 
         changeSlotDate, getSlotValue, isSlotOverride, getSlotDisplayClass, getSlotTime, getSlotInfo,
-        isSlotFull, hasFilterBranches,
+        isSlotFull,
         safeChar: Util.safeChar,
         openReservationModal: (r) => openModal('reservation', r),
         openUserModal: (mode, data = null) => openModal('system', { type: 'user', mode, data }),

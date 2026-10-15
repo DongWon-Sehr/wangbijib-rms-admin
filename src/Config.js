@@ -3,7 +3,7 @@
  */
 const Config = {
   // 0. App Version (명시적인 버전 변경 요청 시 수정 — UI/탭 타이틀에 자동 반영)
-  APP_VERSION: '2.3.1',
+  APP_VERSION: '2.3.2',
 
   // 0-1. BI 로고 (스크립트 소유 계정 Drive 파일)
   LOGO_FILE_ID: '1Ni3HhXrloRWe_idt2XeroEvcS--n6BK9',
