@@ -2,9 +2,13 @@
  * [SlotService] 슬롯 설정 및 관리 (Default / Override)
  */
 const SlotService = {
+  // Capacity applied when a branch has no default slot row for a time slot
+  DEFAULT_SLOT_CAPACITY: 3,
+
   /**
    * [Core] 특정 지점, 특정 날짜/시간의 최대 수용 가능 인원(슬롯) 조회
-   * 우선순위: Override(커스텀) > Default(기본) > Master(기본값 0)
+   * 우선순위: Override(커스텀) > Default(기본) > DEFAULT_SLOT_CAPACITY(미설정)
+   * 기본 슬롯 행이 있으면 비활성이어도 명시 설정으로 보고 0, 행 자체가 없으면 DEFAULT_SLOT_CAPACITY
    * @param {string} branchId - 지점 ID
    * @param {Date} dateObj - 대상 날짜 및 시간
    * @param {Array} overrideList - (Optional) 캐시된 오버라이드 슬롯 목록
@@ -36,15 +40,14 @@ const SlotService = {
 
       // 3. [2순위] Default 확인 (지점별 기본 설정)
       const defaults = Array.isArray(defaultList) ? defaultList : Util.getSheetDataAsObjects(Config.SHEET_NAMES.SLOT_DEFAULT);
-      const targetDefault = defaults.find(d => 
-        d.branch_id === branchId && 
-        d.slot_master_id === masterId &&
-        (d.enabled === true || String(d.enabled) === 'true')
-      );
+      const targetDefault = defaults.find(d => d.branch_id === branchId && d.slot_master_id === masterId);
 
-      if (targetDefault) return Number(targetDefault.slot);
+      if (targetDefault) {
+        const enabled = targetDefault.enabled === true || String(targetDefault.enabled) === 'true';
+        return enabled ? Number(targetDefault.slot) : 0;
+      }
 
-      return 0; // 설정 없으면 0
+      return this.DEFAULT_SLOT_CAPACITY;
     } catch (e) {
       console.log(`[SlotService] MaxSlot Error: ${e.message}`);
       return 0;
@@ -188,9 +191,9 @@ const SlotService = {
         return; 
       }
 
-      // 기본값 조회 (없으면 slot=0, enabled=true로 가정)
+      // 기본값 조회 (행이 없으면 DEFAULT_SLOT_CAPACITY, enabled=true로 가정)
       const def = defaultMap[masterId];
-      const defSlot = def ? def.slot : 0;
+      const defSlot = def ? def.slot : this.DEFAULT_SLOT_CAPACITY;
       const defEnabled = def ? (def.enabled === true || String(def.enabled) === 'true') : true;
 
       // 비교: 기본값과 같은가?
