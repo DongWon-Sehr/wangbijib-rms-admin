@@ -203,6 +203,7 @@
       const users = ref([]);
       const slotMasters = ref([]);
       const slotDefaults = ref([]);
+      const DEFAULT_SLOT_CAPACITY = 3;
       const slotOverrides = ref([]);
       const mailTemplates = ref([]);
       const duplicateGroupsData = ref([]);
@@ -390,8 +391,7 @@
       const selectedBranchFilters = computed(() => filterableBranches.value.filter(b => filterBranchIds.value.includes(b.id)));
       
       const isSlotFull = (branchId, masterId, date) => {
-        const val = getSlotValue(branchId, masterId, date);
-        return val !== '-' && Number(val) <= 0;
+        return Number(getSlotValue(branchId, masterId, date)) <= 0;
       };
       
       const handleTouchStart = (e) => {
@@ -1262,9 +1262,9 @@
       const getSlotInfo = (branchId, masterId, dateStr) => {
         const ov = slotOverridesMap.value[branchId]?.[dateStr]?.[masterId];
         const def = slotDefaultsMap.value[branchId]?.[masterId];
-        let val = '-', isOv = false, cls = 'bg-gray-50 text-gray-500';
+        let val = DEFAULT_SLOT_CAPACITY, isOv = false, cls = 'bg-gray-50 text-gray-400';
         if (ov && ov.enabled) { val = ov.slot; isOv = true; cls = 'bg-amber-100 border border-amber-500'; }
-        else if (def && def.enabled) { val = def.slot; cls = val > 0 ? 'bg-green-50 border border-green-300' : 'bg-red-50 border border-red-300 text-red-700'; }
+        else if (def) { val = def.enabled ? def.slot : 0; cls = val > 0 ? 'bg-green-50 border border-green-300' : 'bg-red-50 border border-red-300 text-red-700'; }
         return { value: val, isOverride: isOv, class: cls, isOverrideData: ov };
       };
       const getSlotValue = (b, m, d) => getSlotInfo(b, m, d).value;
@@ -1420,7 +1420,7 @@
               const branchId = data.data.branch_id; 
 
               cloned.masterSlots = slotMasters.value.map(m => {
-                let slotVal = 0;
+                let slotVal = DEFAULT_SLOT_CAPACITY;
                 let enabledVal = true;
                 const def = slotDefaults.value.find(d => d.branch_id === branchId && d.slot_master_id === m.id);
                 
@@ -1943,7 +1943,6 @@
             selectedMailTemplateId.value = '';
             selectedAltBranchId.value = '';
             const sending = runGoogleScriptSilent('apiSendTemplatedMail',payload);
-            closeModal('reservation');
             showToast('메일 발송 요청을 보냈습니다');
             const res = await sending;
             if (res.success && group) {
@@ -2228,7 +2227,6 @@
         const stored = reservations.value.find(row => row.id === reservation.id);
         if (stored) reservationLogSnapshots.set(reservation.id,JSON.parse(JSON.stringify(stored)));
         const sending = runGoogleScriptSilent(correctEmail ? 'apiCorrectEmailAndInitializeThread' : 'apiInitializeMailThread',payload);
-        closeModal('reservation');
         showToast('메일 처리 요청을 보냈습니다');
         try {
           const response = await sending;

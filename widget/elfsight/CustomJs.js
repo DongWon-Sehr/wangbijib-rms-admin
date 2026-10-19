@@ -3,11 +3,14 @@
    1. Max Pax Validation (Branch Specific)
    2. Group Reservation Modal (9+ Pax)
    3. Branch Disabler (Main Store)
-   4. Auto-expand About Section
+   4. Auto-expand About & Branch Descriptions
    5. Rule-based Time Slot Management (Break Time & Opening Hours)
    6. Mobile Branch Description HTML Rendering
    7. New Branch Badge (Display Only)
+   8. Branch Promo Line (Between Name and Description)
    ========================================================================== */
+
+const CHEESE_PROMO = '🧀 Get Free Grilled Cheese with Reservation';
 
 const STORE_CONFIGS = {
   'Wangbijib Jongno Branch': {
@@ -40,8 +43,9 @@ const STORE_CONFIGS = {
   'Hansik Wangbijib Euljiro Branch': { maxPax: 60, disabled: false, rules: [] },
   'Wangbijib Myeongdong Yukho Branch': { maxPax: 50, disabled: false, rules: [] },
   'Wangbijib Myeongdong 2nd Branch': { maxPax: 40, disabled: false, rules: [] },
-  'Wangbijib Myeongdong Center Branch': { maxPax: 38, disabled: false, rules: [] },
+  'Wangbijib Myeongdong Central Branch': { maxPax: 38, disabled: false, rules: [], promo: CHEESE_PROMO },
   'Hansik Wangbijib Myeongdong Branch': { maxPax: 20, disabled: false, rules: [] },
+  'Hansik Wangbijib Central Branch': { maxPax: 46, disabled: false, rules: [], promo: CHEESE_PROMO },
   'Wangbijib Myeongdong Main Store Branch': { maxPax: 0, disabled: true, rules: [] }
 };
 
@@ -260,13 +264,11 @@ const setupBranchDisabler = () => {
 /* =========================
    [기능 7] 신규 지점 배지 (지점명 파싱용 텍스트 보존)
    ========================= */
-const setupNewBranchBadge = () => {
-  const branchName = 'Hansik Wangbijib Central Branch';
-  const badgeAttribute = 'data-wangbijib-new-branch';
-  const normalizeName = element => element.textContent.replace(/\s+/g, ' ').trim();
-  const titles = new Set();
+const normalizeName = element => element.textContent.replace(/\s+/g, ' ').trim();
 
-  // 해시 클래스 대신 기존 목록 범위에서 정확히 일치하는 가장 안쪽 제목만 찾는다.
+// 해시 클래스 대신 기존 목록 범위에서 정확히 일치하는 가장 안쪽 제목만 찾는다.
+const findBranchTitles = (branchName) => {
+  const titles = new Set();
   document.querySelectorAll('.es-service-selector-container *, [class*="service-card"], [class*="service-card"] *')
     .forEach(element => {
       if (element.closest('.es-text-shortener-content, [class*="description"], [class*="Description"], button, input, textarea, select, script, style')) return;
@@ -274,6 +276,13 @@ const setupNewBranchBadge = () => {
       if (Array.from(element.children).some(child => normalizeName(child) === branchName)) return;
       titles.add(element);
     });
+  return titles;
+};
+
+const setupNewBranchBadge = () => {
+  const branchName = 'Hansik Wangbijib Central Branch';
+  const badgeAttribute = 'data-wangbijib-new-branch';
+  const titles = findBranchTitles(branchName);
 
   // 위젯이 같은 DOM을 다른 지점에 재사용할 때 이전 배지를 제거한다.
   document.querySelectorAll(`[${badgeAttribute}]`).forEach(element => {
@@ -332,6 +341,33 @@ const setupNewBranchBadge = () => {
     }
   `;
   document.head.appendChild(style);
+};
+
+/* =========================
+   [기능 8] 지점명과 설명 사이 프로모션 안내 줄
+   ========================= */
+const setupBranchPromo = () => {
+  const promoAttribute = 'data-wangbijib-promo';
+  // 제목 요소의 형제로 끼워 넣어 지점명 텍스트와 이름 파싱을 보존한다.
+  Object.entries(STORE_CONFIGS).forEach(([branchName, config]) => {
+    if (!config.promo) return;
+    findBranchTitles(branchName).forEach(title => {
+      const next = title.nextElementSibling;
+      if (next && next.getAttribute(promoAttribute) === branchName) return;
+      const line = document.createElement('div');
+      line.setAttribute(promoAttribute, branchName);
+      line.textContent = config.promo;
+      // 제목 행이 가로 flex라서 전체 너비로 줄바꿈시켜 제목 아래·설명 위에 놓는다.
+      line.style.cssText = 'display:block;flex:0 0 100%;width:100%;margin:4px 0 2px;font-size:12px;font-weight:700;line-height:16px;color:#c2410c;pointer-events:none;user-select:none;';
+      title.insertAdjacentElement('afterend', line);
+      title.parentElement.style.setProperty('flex-wrap', 'wrap', 'important');
+    });
+  });
+  // 위젯이 같은 DOM을 다른 지점에 재사용하면 이전 안내 줄을 제거한다.
+  document.querySelectorAll(`[${promoAttribute}]`).forEach(line => {
+    const title = line.previousElementSibling;
+    if (!title || normalizeName(title) !== line.getAttribute(promoAttribute)) line.remove();
+  });
 };
 
 /* =========================
@@ -453,10 +489,11 @@ const setupValidation = () => {
 /* =========================
    [기능 4] 소개멘트 자동 펼치기 (Read More 클릭)
    ========================= */
+// 전체 설명은 "Read more", 모바일 지점 카드 설명은 "more"로 접혀 있어 둘 다 모두 펼친다.
 const autoExpandAbout = () => {
-  const readMoreBtn = Array.from(document.querySelectorAll('.es-text-shortener-control'))
-    .find(btn => btn.textContent.trim().toLowerCase() === 'read more');
-  if (readMoreBtn) readMoreBtn.click();
+  document.querySelectorAll('.es-text-shortener-control').forEach(btn => {
+    if (/^(read\s+)?more$/i.test(btn.textContent.trim())) btn.click();
+  });
 };
 
 /* =========================
@@ -572,6 +609,7 @@ const observer = new MutationObserver(() => {
   setupValidation();
   setupBranchDisabler();
   setupNewBranchBadge();
+  setupBranchPromo();
   autoExpandAbout();
   setupTimeSlotDisabler();
   renderMobileDescriptionHtml();
@@ -583,6 +621,7 @@ observer.observe(document.body, { childList: true, characterData: true, subtree:
 setupValidation();
 setupBranchDisabler();
 setupNewBranchBadge();
+setupBranchPromo();
 autoExpandAbout();
 setupTimeSlotDisabler();
 renderMobileDescriptionHtml();
