@@ -10,7 +10,7 @@
    8. Branch Promo Line (Between Name and Description)
    ========================================================================== */
 
-const CHEESE_PROMO = '🧀 Get Free Grilled Cheese with Reservation';
+const CHEESE_PROMO = '🧀 Get Free Grilled Cheese (BBQ customers only)';
 
 const STORE_CONFIGS = {
   'Wangbijib Jongno Branch': {
