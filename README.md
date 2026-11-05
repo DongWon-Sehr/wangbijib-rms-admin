@@ -4,6 +4,12 @@ Google Workspace 플랫폼을 활용하여 왕비집 전 지점의 예약을 효
 
 현재 앱 버전: **v2.3.3**.
 
+Elfsight 위젯 변경 내역 (2026-11-05, 앱 버전 변경 없음):
+
+- 브라우저 번역(크롬 등)을 켜면 커스텀 JS가 영어 문구로 요소를 찾지 못해 프로모·배지가 사라지고 브레이크타임·인원 제한·9인 이상 모달이 동작하지 않던 문제를 고쳤습니다. 코드가 읽는 지점명·Book 버튼·날짜·시간 슬롯·Confirm Booking 버튼·인원칸·전화번호 칸에 `translate="no"`를 적용합니다. 지점 설명·폼 안내·프로모·에러 문구는 계속 번역됩니다.
+- 인원 초과 입력 시 에러 문구를 반복해서 다시 쓰며 페이지가 멈추던 문제를 고쳤습니다. 에러 문구는 처음 한 번 만들어 두고 표시/숨김만 바꾸므로 번역된 문구도 유지됩니다.
+- 프로모 문구를 `🧀 Free Grilling Cheese on BBQ meat orders`로 바꿨습니다. "Grilled Cheese"가 샌드위치로, "BBQ customers"가 매장 고객으로 번역되던 오해를 없앴습니다.
+
 v2.3.3 변경 내역 (2026-10-19):
 
 - 예약 상세 모달의 메일 발송·메일 초기화·예약 이메일 변경은 요청 후에도 모달을 유지합니다. v2.3.0에서 요청 없이 추가됐던 모달 즉시 닫기를 되돌렸습니다.
@@ -117,7 +123,7 @@ v2.3.0 변경 내역 (2026-10-14):
 
 ## 🚀 배포 가이드 (Deployment via clasp)
 
-예약 위젯의 별도 커스텀 코드는 `widget/elfsight/CustomJs.js`에 있습니다. Elfsight의 커스텀 JS 설정에 파일 내용을 적용하며, `clasp push` 대상(`src`)에는 포함되지 않습니다. 지점 목록의 **Hansik Wangbijib Central Branch** 이름 위에 `✨ Newly Opened` 배지를 표시합니다. 배지는 라일락·핑크·민트 그라데이션 배경과 보라색 글자의 둥근 형태이며, 노란 ✨ 이모지만 13px 크기와 짙은 골드 그림자를 적용해 선명하게 표시합니다. CSS 가상 요소로 표시하여 지점명 텍스트와 기존 예약 규칙의 이름 파싱을 보존하고 목록 재렌더링에도 다시 적용됩니다. **Wangbijib Myeongdong Central Branch**와 **Hansik Wangbijib Central Branch**는 지점명과 설명 사이에 `🧀 Get Free Grilled Cheese with Reservation` 안내 줄을 표시합니다. 안내 줄은 `STORE_CONFIGS`의 `promo` 값으로 지점별 설정하며, 제목 요소의 형제로 삽입해 지점명 파싱을 보존하고 목록 재렌더링 시 다시 적용합니다. Hansik Wangbijib Central Branch의 최대 인원은 46명입니다.
+예약 위젯의 별도 커스텀 코드는 `widget/elfsight/CustomJs.js`에 있습니다. Elfsight의 커스텀 JS 설정에 파일 내용을 적용하며, `clasp push` 대상(`src`)에는 포함되지 않습니다. 지점 목록의 **Hansik Wangbijib Central Branch** 이름 위에 `✨ Newly Opened` 배지를 표시합니다. 배지는 라일락·핑크·민트 그라데이션 배경과 보라색 글자의 둥근 형태이며, 노란 ✨ 이모지만 13px 크기와 짙은 골드 그림자를 적용해 선명하게 표시합니다. CSS 가상 요소로 표시하여 지점명 텍스트와 기존 예약 규칙의 이름 파싱을 보존하고 목록 재렌더링에도 다시 적용됩니다. **Wangbijib Myeongdong Central Branch**와 **Hansik Wangbijib Central Branch**는 지점명과 설명 사이에 `🧀 Free Grilling Cheese on BBQ meat orders` 안내 줄을 표시합니다. 안내 줄은 `STORE_CONFIGS`의 `promo` 값으로 지점별 설정하며, 제목 요소의 형제로 삽입해 지점명 파싱을 보존하고 목록 재렌더링 시 다시 적용합니다. Hansik Wangbijib Central Branch의 최대 인원은 46명입니다. 브라우저 번역을 켜도 규칙이 동작하도록 코드가 읽는 영어 문구(지점명·버튼·날짜·시간·인원칸·전화번호 칸)에는 `translate="no"`를 적용하고, 프로모·설명·에러 문구는 번역되게 둡니다.
 
 본 프로젝트는 Google Apps Script로 작성되었으며, `clasp` 도구를 사용하여 배포합니다.
 
