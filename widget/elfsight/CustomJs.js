@@ -10,7 +10,7 @@
    8. Branch Promo Line (Between Name and Description)
    ========================================================================== */
 
-const CHEESE_PROMO = '🧀 Free Grilling Cheese (BBQ customers only)';
+const CHEESE_PROMO = '🧀 Free Grilling Cheese on BBQ meat orders';
 
 const STORE_CONFIGS = {
   'Wangbijib Jongno Branch': {
@@ -279,15 +279,6 @@ const findBranchTitles = (branchName) => {
   return titles;
 };
 
-// Emails and calendar alerts use English branch names; browser translation would also break title matching.
-// Book buttons are kept too because translators render "Book" as the noun (e.g. 책).
-const keepBranchCardsUntranslated = () => {
-  Object.keys(STORE_CONFIGS).forEach(name => {
-    findBranchTitles(name).forEach(title => title.setAttribute('translate', 'no'));
-  });
-  document.querySelectorAll('[class*="service-card"] button').forEach(btn => btn.setAttribute('translate', 'no'));
-};
-
 const setupNewBranchBadge = () => {
   const branchName = 'Hansik Wangbijib Central Branch';
   const badgeAttribute = 'data-wangbijib-new-branch';
@@ -395,6 +386,22 @@ const getRequiredInput = (key) => {
   return field ? document.querySelector(field.selector) : null;
 };
 
+// Browser translation must not touch the English text these rules parse (branch names, weekday, AM/PM, Confirm Booking, Pax aria-label);
+// emails and calendar alerts are English too. Book buttons are kept because translators render "Book" as the noun (e.g. 책).
+const keepParsedTextUntranslated = () => {
+  Object.keys(STORE_CONFIGS).forEach(name => {
+    findBranchTitles(name).forEach(title => title.setAttribute('translate', 'no'));
+  });
+  document.querySelectorAll('[class*="service-card"] button, .es-days-carousel-day, .es-current-day-content, .es-time-slot-picker-time-container, input[aria-label*="Pax"]')
+    .forEach(element => element.setAttribute('translate', 'no'));
+  document.querySelectorAll('button').forEach(btn => {
+    if (btn.textContent.trim().toLowerCase().includes('confirm booking')) btn.setAttribute('translate', 'no');
+  });
+  // Translators reorder the phone mask digits, which breaks isPhoneComplete.
+  const phoneInput = getRequiredInput('phone');
+  if (phoneInput) (phoneInput.closest('.es-fields-phone') || phoneInput.parentElement).setAttribute('translate', 'no');
+};
+
 // Elfsight ProgressiveMask는 "입력된 숫자 + 남은 자리 placeholder 숫자"를 함께 보여준다.
 // 따라서 mask의 숫자 개수와 입력값의 숫자 개수가 같으면(남은 자리 0개) 완성이다.
 // 완성 시 mask가 제거되는 국가(US)도 있어, mask가 없으면 국가코드 뒤 번호 유무로 본다.
@@ -415,6 +422,37 @@ const isPhoneComplete = (phoneInput) => {
   return /\s\d/.test(value);
 };
 
+const PAX_ERRORS = {
+  invalid: () => '⚠️ Please enter a valid number.',
+  nonPositive: () => '⚠️ Must be greater than 0.',
+  overMax: maxPax => `⚠️ Maximum capacity exceeded (Max ${maxPax} for this branch).`
+};
+
+// Messages are created once and only shown/hidden: rewriting their text would undo browser translation
+// and re-trigger the observer (identical rewrites froze the page).
+const getPaxErrorBox = (paxInput, maxPax) => {
+  let box = document.getElementById('pax-max-error');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'pax-max-error';
+    box.style.cssText = 'color: #ff4d4f; font-size: 13px; margin-top: 4px; font-weight: bold;';
+    Object.keys(PAX_ERRORS).forEach(key => {
+      const message = document.createElement('div');
+      message.dataset.paxError = key;
+      message.style.display = 'none';
+      box.appendChild(message);
+    });
+    paxInput.parentElement.appendChild(box);
+  }
+  box.querySelectorAll('[data-pax-error]').forEach(message => {
+    const max = String(maxPax);
+    if (message.dataset.max === max) return;
+    message.dataset.max = max;
+    message.textContent = PAX_ERRORS[message.dataset.paxError](maxPax);
+  });
+  return box;
+};
+
 const applyValidation = () => {
   const confirmBtn = Array.from(document.querySelectorAll('button'))
     .find(btn => btn.textContent.trim().toLowerCase().includes('confirm booking'));
@@ -430,7 +468,7 @@ const applyValidation = () => {
 
   // --- Pax 상세 검증 (에러 문구 노출) ---
   let paxValid = false;
-  let paxMessage = '';
+  let paxErrorKey = '';
   if (paxInput) {
     const val = paxInput.value.trim();
     if (val === '') {
@@ -438,29 +476,22 @@ const applyValidation = () => {
     } else {
       const num = Number(val);
       if (!Number.isInteger(num)) {
-        paxMessage = '⚠️ Please enter a valid number.';
+        paxErrorKey = 'invalid';
       } else if (num <= 0) {
-        paxMessage = '⚠️ Must be greater than 0.';
+        paxErrorKey = 'nonPositive';
       } else if (num > maxPax) {
-        paxMessage = `⚠️ Maximum capacity exceeded (Max ${maxPax} for this branch).`;
+        paxErrorKey = 'overMax';
       } else {
         paxValid = true;
       }
     }
 
-    let errorMsg = document.getElementById('pax-max-error');
-    if (!errorMsg) {
-      errorMsg = document.createElement('div');
-      errorMsg.id = 'pax-max-error';
-      errorMsg.style.cssText = 'color: #ff4d4f; font-size: 13px; margin-top: 4px; font-weight: bold; display: none;';
-      paxInput.parentElement.appendChild(errorMsg);
-    }
-    if (paxMessage) {
-      errorMsg.innerText = paxMessage;
-      errorMsg.style.display = 'block';
+    getPaxErrorBox(paxInput, maxPax).querySelectorAll('[data-pax-error]').forEach(message => {
+      message.style.display = message.dataset.paxError === paxErrorKey ? 'block' : 'none';
+    });
+    if (paxErrorKey) {
       paxInput.style.setProperty('border', '2px solid #ff4d4f', 'important');
     } else {
-      errorMsg.style.display = 'none';
       paxInput.style.border = '';
     }
   }
@@ -617,7 +648,7 @@ const renderMobileDescriptionHtml = () => {
 const observer = new MutationObserver(() => {
   setupValidation();
   setupBranchDisabler();
-  keepBranchCardsUntranslated();
+  keepParsedTextUntranslated();
   setupNewBranchBadge();
   setupBranchPromo();
   autoExpandAbout();
@@ -630,7 +661,7 @@ observer.observe(document.body, { childList: true, characterData: true, subtree:
 // 초기 로드 시 실행
 setupValidation();
 setupBranchDisabler();
-keepBranchCardsUntranslated();
+keepParsedTextUntranslated();
 setupNewBranchBadge();
 setupBranchPromo();
 autoExpandAbout();
