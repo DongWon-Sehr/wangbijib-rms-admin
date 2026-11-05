@@ -250,7 +250,7 @@
             <i :class="includePastIssues ? 'ph-fill ph-check-square' : 'ph ph-square'" class="text-sm"></i> 지난 건 포함
           </button>
           <button
-            v-if="filterIssueType === 'duplicate' && duplicateGroups.length > 0"
+            v-if="filterIssueType === 'duplicate' && visibleDuplicateGroups.length > 0"
             type="button"
             @click="toggleAllGroupsCollapse"
             class="px-3 py-1.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-900 hover:bg-purple-200 border border-purple-300 transition flex items-center gap-1 shadow-sm ml-auto"
@@ -410,17 +410,17 @@
 
         <!-- [CASE 1] 중복 의심 필터 활성화 시: 그룹별 다중 <tbody> 렌더링 -->
         <template v-if="filterIssueType === 'duplicate'">
-          <tbody v-if="duplicateGroups.length === 0" class="bg-white">
+          <tbody v-if="visibleDuplicateGroups.length === 0" class="bg-white">
             <tr>
               <td colspan="14" class="p-12 text-center text-gray-400">
                 <i class="ph ph-check-circle text-5xl mb-2 text-green-500 block"></i>
-                <p class="font-bold text-gray-700 text-base">감지된 중복 의심 예약이 없습니다.</p>
-                <p class="text-xs text-gray-400 mt-1">취소되지 않은 미래 예약 중 중복 건이 없습니다.</p>
+                <p class="font-bold text-gray-700 text-base">{{ filterText ? '검색어와 일치하는 중복 그룹이 없습니다.' : '감지된 중복 의심 예약이 없습니다.' }}</p>
+                <p v-if="!filterText" class="text-xs text-gray-400 mt-1">취소되지 않은 미래 예약 중 중복 건이 없습니다.</p>
               </td>
             </tr>
           </tbody>
           <tbody
-            v-for="(group, gIdx) in duplicateGroups"
+            v-for="(group, gIdx) in visibleDuplicateGroups"
             :key="group.id"
             class="divide-y divide-gray-200 border-b-4 border-gray-200 bg-white"
           >
@@ -751,13 +751,13 @@
     <div class="md:hidden p-4 space-y-4 pb-20">
       <!-- [CASE 1] 모바일 중복 의심 필터 활성화 시: 그룹별 묶음 렌더링 -->
       <template v-if="filterIssueType === 'duplicate'">
-        <div v-if="duplicateGroups.length === 0" class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center text-gray-400">
+        <div v-if="visibleDuplicateGroups.length === 0" class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center text-gray-400">
           <i class="ph ph-check-circle text-5xl mb-2 text-green-500 inline-block"></i>
-          <p class="font-bold text-gray-700 text-base">감지된 중복 의심 예약이 없습니다.</p>
-          <p class="text-xs text-gray-400 mt-1">취소되지 않은 미래 예약 중 중복 건이 없습니다.</p>
+          <p class="font-bold text-gray-700 text-base">{{ filterText ? '검색어와 일치하는 중복 그룹이 없습니다.' : '감지된 중복 의심 예약이 없습니다.' }}</p>
+          <p v-if="!filterText" class="text-xs text-gray-400 mt-1">취소되지 않은 미래 예약 중 중복 건이 없습니다.</p>
         </div>
 
-        <div v-for="(group, gIdx) in duplicateGroups" :key="group.id" class="space-y-2.5">
+        <div v-for="(group, gIdx) in visibleDuplicateGroups" :key="group.id" class="space-y-2.5">
           <!-- 모바일 그룹 헤더 바 -->
           <div class="bg-purple-50 rounded-xl p-3 border border-purple-200 flex flex-col gap-2 shadow-sm">
             <div class="flex items-center justify-between">

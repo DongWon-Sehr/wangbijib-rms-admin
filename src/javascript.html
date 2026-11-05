@@ -989,6 +989,12 @@
       });
       const emailErrorCount = computed(() => emailErrorReservationsAll.value.filter(isUpcomingReservation).length);
 
+      const getRequestTime = r => new Date(r.booking_request_date || r.created_at).getTime() || 0;
+
+      const normalizeFilterText = value => (value || '').replace(/\s+/g, '').toLowerCase();
+      const matchesFilterText = (res, text) => [res.customer_name, res.email, res.notes, res.internal_notes, res.private_notes, res.id]
+        .some(field => normalizeFilterText(field).includes(text));
+
       // --- 중복 예약 그룹화 알고리즘 (Disjoint-Set Connected Components) ---
       const duplicateGroupsAll = computed(() => {
         const allRes = reservations.value || [];
@@ -1060,7 +1066,8 @@
               match_reasons: matchReasons,
               matchLabel: matchReasons.join(', '),
               title: `${validMembers[0]?.customer_name || '고객'} (${validMembers.length}건)`,
-              reservations: validMembers,
+              // Latest booking request first; list, detail modal, mail modal and mail body all read this order.
+              reservations: validMembers.slice().sort((a, b) => getRequestTime(b) - getRequestTime(a)),
               hasUpcoming: validMembers.some(isUpcomingReservation),
               notes: g.notes || '',
               created_at: g.created_at || validMembers[0]?.created_at,
@@ -1069,12 +1076,8 @@
           }
         });
 
-        // 방문일자 빠른 순으로 정렬
-        finalGroups.sort((g1, g2) => {
-          const t1 = Math.min(...g1.reservations.map(r => new Date(r.reservation_date).getTime() || 0));
-          const t2 = Math.min(...g2.reservations.map(r => new Date(r.reservation_date).getTime() || 0));
-          return t1 - t2;
-        });
+        // Members are already latest-request first, so reservations[0] holds each group's latest request.
+        finalGroups.sort((g1, g2) => getRequestTime(g2.reservations[0]) - getRequestTime(g1.reservations[0]));
 
         return finalGroups;
       });
@@ -1084,6 +1087,12 @@
         return duplicateGroupsAll.value.filter(g => g.hasUpcoming);
       });
       const duplicateGroupTotalCount = computed(() => duplicateGroupsAll.value.filter(g => g.hasUpcoming).length);
+      // A group stays whole when any member matches the search, so duplicates can still be compared.
+      const visibleDuplicateGroups = computed(() => {
+        const text = normalizeFilterText(filterText.value);
+        if (!text) return duplicateGroups.value;
+        return duplicateGroups.value.filter(g => g.reservations.some(r => matchesFilterText(r, text)));
+      });
       const duplicateGroupMap = computed(() => {
         const map = {};
         duplicateGroups.value.forEach(group => {
@@ -1099,13 +1108,13 @@
       });
 
       const isAllVisibleSelected = computed(() => {
-        const list = filterIssueType.value === 'email_error' ? emailErrorReservations.value : paginatedReservations.value;
+        const list = filterIssueType.value === 'email_error' ? filteredReservations.value : paginatedReservations.value;
         if (!list || list.length === 0) return false;
         return list.every(r => selectedReservationIds.value.includes(r.id));
       });
 
       const toggleSelectAllVisible = () => {
-        const list = filterIssueType.value === 'email_error' ? emailErrorReservations.value : paginatedReservations.value;
+        const list = filterIssueType.value === 'email_error' ? filteredReservations.value : paginatedReservations.value;
         if (isAllVisibleSelected.value) {
           const listIds = new Set(list.map(r => r.id));
           selectedReservationIds.value = selectedReservationIds.value.filter(id => !listIds.has(id));
@@ -1302,20 +1311,12 @@
         return 'https://calendar.google.com/calendar/embed?' + params + '&src=' + encodeURIComponent(calId);
       });
 
-      const filteredReservations = computed(() => { 
+      const filteredReservations = computed(() => {
         let list = reservations.value || [];
-        const text = filterText.value.replace(/\s+/g, '').toLowerCase();
-        
+        const text = normalizeFilterText(filterText.value);
+
         if (text) {
-          list = list.filter(res => {
-            const name = (res.customer_name || '').replace(/\s+/g, '').toLowerCase();
-            const email = (res.email || '').replace(/\s+/g, '').toLowerCase();
-            const notes = (res.notes || '').replace(/\s+/g, '').toLowerCase();
-            const internal = (res.internal_notes || '').replace(/\s+/g, '').toLowerCase();
-            const priv = (res.private_notes || '').replace(/\s+/g, '').toLowerCase();
-            const id = (res.id || '').replace(/\s+/g, '').toLowerCase();
-            return name.includes(text) || email.includes(text) || notes.includes(text) || internal.includes(text) || priv.includes(text) || id.includes(text);
-          });
+          list = list.filter(res => matchesFilterText(res, text));
         }
         if (filterStatus.value !== 'all') {
           list = list.filter(r => r.status === filterStatus.value);
@@ -2947,7 +2948,7 @@
         filteredReservations, paginatedReservations, totalPage, branchMapKo, branchMapEn, filterableBranches, slotSettingsBranches, filteredSlotBranches,
         activeCalendarId, calendarIframeSrc, slotMasterMap,
         notifications, notificationCount,
-        emailErrorReservations, emailErrorCount, duplicateGroups, duplicateGroupTotalCount, duplicateGroupMap, activeReservationDuplicateGroup,
+        emailErrorReservations, emailErrorCount, duplicateGroups, visibleDuplicateGroups, duplicateGroupTotalCount, duplicateGroupMap, activeReservationDuplicateGroup,
         bouncedEmailsData, activeReservationIsBounced, activeReservationEmailError, isBouncedReservation, getReservationEmailError,
         isAllVisibleSelected, toggleSelectAllVisible, toggleIssueFilter,
         validateEmail, hasEmailError, getEmailErrorMsg, getEmailSuggestion, activeReservationEmailSuggestion, applyEmailSuggestion,
