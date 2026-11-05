@@ -1076,12 +1076,8 @@
           }
         });
 
-        // 방문일자 빠른 순으로 정렬
-        finalGroups.sort((g1, g2) => {
-          const t1 = Math.min(...g1.reservations.map(r => new Date(r.reservation_date).getTime() || 0));
-          const t2 = Math.min(...g2.reservations.map(r => new Date(r.reservation_date).getTime() || 0));
-          return t1 - t2;
-        });
+        // Members are already latest-request first, so reservations[0] holds each group's latest request.
+        finalGroups.sort((g1, g2) => getRequestTime(g2.reservations[0]) - getRequestTime(g1.reservations[0]));
 
         return finalGroups;
       });
