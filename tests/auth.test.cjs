@@ -174,7 +174,7 @@ function setupBrowserAuth({ callback = null, oauthState = null, clientIp = null 
     localStorage: storage(localValues),
     sessionStorage: storage(sessionValues),
     navigator: { userAgent: 'iPhone', maxTouchPoints: 1 },
-    document: { getElementById: () => ({ dataset: {} }), addEventListener() {} },
+    document: { listeners: {}, getElementById: () => ({ dataset: {} }), addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); } },
     window: { WANG_OAUTH_RESULT: callback, addEventListener() {} },
     ...(clientIp === null ? {} : { fetch: async () => { ipLookups.push(1); if (clientIp instanceof Error) throw clientIp; return { json: async () => ({ ip: clientIp }) }; } }),
     alert: message => errors.push(message),
@@ -216,7 +216,7 @@ function setupBrowserAuth({ callback = null, oauthState = null, clientIp = null 
   const source = fs.readFileSync('src/javascript.html', 'utf8').replace(/^<script>\s*/, '').replace(/<\/script>\s*$/, '');
   vm.runInContext(source, context);
   return {
-    state, savedToken, localValues, sessionValues, calls, responses, errors, intervals, ipLookups,
+    state, context, savedToken, localValues, sessionValues, calls, responses, errors, intervals, ipLookups,
     async start() {
       mounted.forEach(hook => hook());
       await new Promise(resolve => setImmediate(resolve));
@@ -777,4 +777,41 @@ test('failed IP lookup keeps the request going with an empty IP and no error', a
   assert.deepEqual({ ...browser.calls.find(call => call.name === 'apiGetBranches').args[0] }, { token: browser.savedToken, ip: '' });
   assert.equal(browser.state.appState.value, 'authorized');
   assert.deepEqual(browser.errors, []);
+});
+
+test('a mutation cut off by leaving the page keeps the optimistic value and resyncs on return, while a real failure still rolls back', async () => {
+  const browser = setupBrowserAuth();
+  await browser.start();
+  const failing = () => { let reject; const promise = new Promise((_, fail) => { reject = fail; }); return {promise,reject}; };
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const cutOff = {id:'r1',customer_name:'홍길동',is_read:false};
+  const rejected = {id:'r2',customer_name:'김철수',is_read:false};
+  browser.state.reservations.value = [cutOff,rejected];
+
+  const lost = failing();
+  browser.responses.apiMarkReservationAsRead = lost.promise;
+  browser.state.markAsReadOnClick(cutOff);
+  browser.context.document.hidden = true;
+  lost.reject(new Error('NetworkError: Connection failure due to HTTP 0'));
+  await settle();
+  assert.equal(cutOff.is_read,true);
+  assert.equal(browser.state.alertModal.isOpen,false);
+
+  const reads = () => browser.calls.filter(call => call.name === 'apiGetReservations').length;
+  const readsBeforeReturn = reads();
+  browser.responses.apiGetReservations = {success:true,data:[{...cutOff,is_read:true},{...rejected}]};
+  browser.context.document.hidden = false;
+  browser.context.document.listeners.visibilitychange.forEach(handler => handler());
+  await settle();
+  assert.equal(reads(),readsBeforeReturn + 1);
+
+  const serverError = failing();
+  browser.responses.apiMarkReservationAsRead = serverError.promise;
+  const target = browser.state.reservations.value.find(row => row.id === 'r2');
+  browser.state.markAsReadOnClick(target);
+  assert.equal(target.is_read,true);
+  serverError.reject(new Error('Exception: 시트 저장 실패'));
+  await settle();
+  assert.equal(target.is_read,false);
+  assert.equal(browser.state.alertModal.isOpen,true);
 });
