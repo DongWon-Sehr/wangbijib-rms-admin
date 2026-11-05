@@ -10,7 +10,7 @@
    8. Branch Promo Line (Between Name and Description)
    ========================================================================== */
 
-const CHEESE_PROMO = '🧀 Get Free Grilled Cheese (BBQ customers only)';
+const CHEESE_PROMO = '🧀 Free Grilling Cheese (BBQ customers only)';
 
 const STORE_CONFIGS = {
   'Wangbijib Jongno Branch': {
@@ -277,6 +277,15 @@ const findBranchTitles = (branchName) => {
       titles.add(element);
     });
   return titles;
+};
+
+// Emails and calendar alerts use English branch names; browser translation would also break title matching.
+// Book buttons are kept too because translators render "Book" as the noun (e.g. 책).
+const keepBranchCardsUntranslated = () => {
+  Object.keys(STORE_CONFIGS).forEach(name => {
+    findBranchTitles(name).forEach(title => title.setAttribute('translate', 'no'));
+  });
+  document.querySelectorAll('[class*="service-card"] button').forEach(btn => btn.setAttribute('translate', 'no'));
 };
 
 const setupNewBranchBadge = () => {
@@ -608,6 +617,7 @@ const renderMobileDescriptionHtml = () => {
 const observer = new MutationObserver(() => {
   setupValidation();
   setupBranchDisabler();
+  keepBranchCardsUntranslated();
   setupNewBranchBadge();
   setupBranchPromo();
   autoExpandAbout();
@@ -620,6 +630,7 @@ observer.observe(document.body, { childList: true, characterData: true, subtree:
 // 초기 로드 시 실행
 setupValidation();
 setupBranchDisabler();
+keepBranchCardsUntranslated();
 setupNewBranchBadge();
 setupBranchPromo();
 autoExpandAbout();
