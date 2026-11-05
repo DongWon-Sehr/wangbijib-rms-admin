@@ -572,13 +572,14 @@
         });
         if (funcName !== 'apiMarkReservationAsRead') bouncedEmailsData.value = bouncedEmailsData.value.filter(row => !originals.some(({before}) =>
           (before.email_thread_id && row.threadId === before.email_thread_id) || (before.email && (row.recipientEmail || '').toLowerCase() === before.email.toLowerCase())));
-        return response => {
+        return (response, outcomeUnknown) => {
           originals.forEach(({row,before}) => {
+            if (outcomeUnknown) { delete row.mail_pending; return; }
             if (!response?.success) Object.assign(row,before);
             else if (response.data?.threadId) { row.email_thread_id = response.data.threadId; if (response.data.email) row.email = response.data.email; }
             delete row.mail_pending;
           });
-          if (!response?.success) bouncedEmailsData.value = bounceBefore;
+          if (!outcomeUnknown && !response?.success) bouncedEmailsData.value = bounceBefore;
         };
       };
       const beginOptimisticActivity = (funcName, arg1, arg2, requestId) => {
@@ -668,7 +669,7 @@
         return funcName + '/' + (p.reservationId || p.targetReservationId || p.groupId || p.id || arg1 || 'system');
       };
       const trackDataMutation = (funcName, arg1, arg2) => {
-        if (!/^api(?:Update|Send|Initialize|Correct|Add|Mark|Save|Delete|Create|Clear|Remove|Exclude|Run|Backfill)/.test(funcName)) return () => {};
+        if (!isMutationApi(funcName)) return () => {};
         const requestedSessionToken = sessionToken;
         const p = arg1 && typeof arg1 === 'object' ? arg1 : {};
         const data = arg2 && typeof arg2 === 'object' ? arg2 : {};
@@ -683,11 +684,14 @@
         const finishDuplicate = beginOptimisticDuplicate(funcName,arg1,requestId);
         ++dataMutationRevision;
         ++pendingDataMutations;
-        return response => {
+        return (response, outcomeUnknown) => {
           if (sessionToken && requestedSessionToken === sessionToken) {
-            finishSettings(response);
-            finishReservation(response);
-            finishDuplicate(response);
+            // Outcome unknown: keep the optimistic screen and let the resync show what the server actually saved.
+            if (!outcomeUnknown) {
+              finishSettings(response);
+              finishDuplicate(response);
+            }
+            finishReservation(response, outcomeUnknown);
             if (currentUser.value?.role === 'admin') finishActivity(response);
           }
           pendingRequestKeys.delete(key);
@@ -695,17 +699,42 @@
           ++dataMutationRevision;
         };
       };
+      // Mobile tab/app switches freeze the page and drop google.script.run responses even after the server saved the change.
+      // Such failures have an unknown outcome: no rollback, then resync with the server once the page is back.
+      let pageInterruptions = 0;
+      let resyncPending = false;
+      const isMutationApi = funcName => /^api(?:Update|Send|Initialize|Correct|Add|Mark|Save|Delete|Create|Clear|Remove|Exclude|Run|Backfill)/.test(funcName);
+      const isConnectionLostError = err => !!(err && err.connectionLost);
+      const toRequestError = (err, interruptionsAtStart) => {
+        const error = new Error(err);
+        error.connectionLost = pageInterruptions !== interruptionsAtStart || document.hidden === true || navigator.onLine === false
+          || /NetworkError|HTTP 0|connection/i.test(String(err && err.message || err));
+        return error;
+      };
+      const resyncAfterConnectionLoss = async () => {
+        if (document.hidden === true || navigator.onLine === false || isSyncing.value) { resyncPending = true; return; }
+        resyncPending = false;
+        isSyncing.value = true;
+        syncCountdown.value = 60;
+        try {
+          if (await refreshInitialData(true) !== false) showToast('연결이 끊겼던 요청을 서버 데이터로 다시 확인했습니다');
+        } finally {
+          isSyncing.value = false;
+        }
+      };
+
       const runGoogleScript = (funcName, arg1, arg2, arg3) => {
         isLoading.value = true;
         if (!loadingMessage.value) loadingMessage.value = '처리 중...';
 
         let finishMutation;
         try { finishMutation = trackDataMutation(funcName,arg1,arg2); } catch (err) { isLoading.value = false; return Promise.reject(err); }
-        const finalize = response => {
-          finishMutation(response);
+        const finalize = (response, outcomeUnknown) => {
+          finishMutation(response, outcomeUnknown);
           isLoading.value = false;
           loadingMessage.value = ''; // 여기서 초기화
         };
+        const interruptionsAtStart = pageInterruptions;
 
         return new Promise((resolve, reject) => {
           google.script.run
@@ -715,8 +744,10 @@
               if (res && res.success) resolve(res); else reject(new Error((res && res.message) || "서버 응답이 비어 있습니다 (직렬화 실패 가능)"));
             })
             .withFailureHandler((err) => {
-              finalize();
-              reject(new Error(err));
+              const error = toRequestError(err, interruptionsAtStart);
+              finalize(undefined, error.connectionLost);
+              if (error.connectionLost && isMutationApi(funcName)) resyncAfterConnectionLoss();
+              reject(error);
             })[funcName](sessionEnvelope(sessionToken), arg1, arg2, arg3);
         });
       };
@@ -724,6 +755,7 @@
       const runGoogleScriptSilent = (funcName, arg1, arg2, arg3) => {
         let finishMutation;
         try { finishMutation = trackDataMutation(funcName,arg1,arg2); } catch (err) { return Promise.reject(err); }
+        const interruptionsAtStart = pageInterruptions;
         return new Promise((resolve, reject) => {
           google.script.run
             .withSuccessHandler((res) => {
@@ -731,8 +763,10 @@
               if (res && res.success) resolve(res); else reject(new Error((res && res.message) || "서버 응답이 비어 있습니다 (직렬화 실패 가능)"));
             })
             .withFailureHandler((err) => {
-              finishMutation();
-              reject(new Error(err));
+              const error = toRequestError(err, interruptionsAtStart);
+              finishMutation(undefined, error.connectionLost);
+              if (error.connectionLost && isMutationApi(funcName)) resyncAfterConnectionLoss();
+              reject(error);
             })[funcName](sessionEnvelope(sessionToken), arg1, arg2, arg3);
         });
       };
@@ -1412,7 +1446,7 @@
             selectedMailTemplateId.value = '';
             selectedAltBranchId.value = '';
             if (cloned.is_read === false) {
-              runGoogleScriptSilent('apiMarkReservationAsRead', cloned.id).catch(err => showCustomAlert('읽음 저장 실패',err.message));
+              runGoogleScriptSilent('apiMarkReservationAsRead', cloned.id).catch(err => isConnectionLostError(err) || showCustomAlert('읽음 저장 실패',err.message));
             }
           } else if (type === 'system' || type === 'mail') {
             if (type === 'system' && data.mode === 'batch') {
@@ -1511,7 +1545,7 @@
       
       const markAsReadOnClick = (res) => {
         if (res && res.is_read === false) {
-          runGoogleScriptSilent('apiMarkReservationAsRead', res.id).catch(err => showCustomAlert('읽음 저장 실패',err.message));
+          runGoogleScriptSilent('apiMarkReservationAsRead', res.id).catch(err => isConnectionLostError(err) || showCustomAlert('읽음 저장 실패',err.message));
         }
       };
       
@@ -1542,6 +1576,7 @@
           runGoogleScriptSilent(apiName, res.id, newValue)
             .then(r => { if (!r || !r.success) throw new Error((r && r.message) || '요청이 실패했습니다.'); })
             .catch(err => {
+              if (isConnectionLostError(err)) return;
               console.error('[Mutation Error] inline status change fail:', err);
               res[field] = snapshot;
               showCustomAlert('오류', '상태 변경에 실패하여 변경 전 상태로 되돌렸습니다.\n' + err.message);
@@ -1632,7 +1667,7 @@
         if (!res) return;
 
         if (res.is_read === false) {
-          runGoogleScriptSilent('apiMarkReservationAsRead', res.id).catch(err => showCustomAlert('읽음 저장 실패',err.message));
+          runGoogleScriptSilent('apiMarkReservationAsRead', res.id).catch(err => isConnectionLostError(err) || showCustomAlert('읽음 저장 실패',err.message));
         }
 
         if (!(await showCustomConfirm("확인", "발송 완료 처리하시겠습니까?"))) return;
@@ -1665,6 +1700,7 @@
             if (!response.success) throw new Error(response.message || '처리 실패');
           })
           .catch(err => {
+            if (isConnectionLostError(err)) return;
             rollbackTo(res);
             if (listItem && listItem !== res) rollbackTo(listItem);
             if (syncOriginal) rollbackTo(originalReservation.value);
@@ -1872,6 +1908,7 @@
         runGoogleScriptSilent('apiUpdateReservation', payload)
           .then(res => { if (!res.success) throw new Error(res.message || '저장 실패'); })
           .catch(e => {
+            if (isConnectionLostError(e)) return;
             if (target && listSnapshot) Object.assign(target, listSnapshot);
             bouncedEmailsData.value = [...bouncedEmailsData.value,...bounceSnapshot.filter(row => !bouncedEmailsData.value.includes(row))];
             if (modalState.reservation && activeReservation.value && activeReservation.value.id === payload.id && listSnapshot) {
@@ -1951,6 +1988,7 @@
                 .catch(err => console.warn('메일 발송 기록 실패: ' + err.message));
             }
           } catch (e) {
+            if (isConnectionLostError(e)) return;
             if (!activeReservation.value || activeReservation.value.id === selectionBefore.id) {
               selectedMailTemplateId.value = selectionBefore.template; selectedAltBranchId.value = selectionBefore.alt;
             }
@@ -2000,6 +2038,7 @@
           showToast('중복 해제되었습니다');
 
         } catch (e) {
+          if (isConnectionLostError(e)) return;
           // [Rollback] 서버 오류 시 즉시 이전 상태로 복구
           const affected = row => [targetGroup.id,'cleared_' + res.id].includes(row.group_id || row.id);
           duplicateGroupsData.value = [...duplicateGroupsData.value.filter(row => !affected(row)),...snapshot.filter(affected)];
@@ -2038,6 +2077,7 @@
           showToast('중복 일괄 해제되었습니다');
 
         } catch (e) {
+          if (isConnectionLostError(e)) return;
           // [Rollback] 서버 오류 시 복구
           const affected = row => (row.group_id || row.id) === group.id;
           duplicateGroupsData.value = [...duplicateGroupsData.value.filter(row => !affected(row)),...snapshot.filter(affected)];
@@ -2075,6 +2115,7 @@
             showCustomAlert('오류', (res && res.message) || '생성 실패');
           }
         } catch (e) {
+          if (isConnectionLostError(e)) return;
           if (selectedReservationIds.value.length === 0) selectedReservationIds.value = selectionBefore;
           showCustomAlert('오류', e.message);
         } finally {
@@ -2183,7 +2224,7 @@
             showCustomAlert('발송 실패', (res && res.message) || '메일 발송 중 오류가 발생했습니다.');
           }
         } catch (e) {
-          showCustomAlert('오류', e.message);
+          if (!isConnectionLostError(e)) showCustomAlert('오류', e.message);
         } finally {
           isSendingDuplicateMail.value = false;
           sendingDuplicateMailGroupId.value = null;
@@ -2233,7 +2274,7 @@
           const response = await sending;
           runGoogleScriptSilent('apiAddLabelsToThread',{threadId:response.data.threadId,pax:reservation.pax,status:reservation.status,
             deposit_status:reservation.deposit_status,reservationId:reservation.id}).catch(err => console.warn('메일 라벨 처리 실패: ' + err.message));
-        } catch (err) {showCustomAlert('메일 처리 실패',err.message);}
+        } catch (err) { if (!isConnectionLostError(err)) showCustomAlert('메일 처리 실패',err.message); }
       };
       const initializeMailThread = () => requestReservationMail(false);
       const handleCorrectEmailAndSendConfirmation = () => requestReservationMail(true);
@@ -2509,6 +2550,7 @@
           runGoogleScriptSilent('apiSaveSystemSettings', apiType, d)
             .then(res => { if (!res.success) throw new Error(res.message || '저장 실패'); })
             .catch(e => {
+              if (isConnectionLostError(e)) return;
               const restore = (collection,snapshot) => {
                 const masters = d.payload ? Object.keys(d.payload) : [String(d.slot_master_id)];
                 const touched = row => row.branch_id === d.branch_id && masters.includes(String(row.slot_master_id))
@@ -2547,7 +2589,7 @@
               showCustomAlert('알림', '저장됐습니다. 변경된 계정 상태를 적용하려면 다시 로그인해 주세요.');
             }
           } catch (err) {
-            if (sessionToken === requestedSessionToken) showCustomAlert('저장 실패', '사용자 정보를 저장하지 못해 변경 전 상태로 되돌렸습니다.\n' + err.message);
+            if (sessionToken === requestedSessionToken && !isConnectionLostError(err)) showCustomAlert('저장 실패', '사용자 정보를 저장하지 못해 변경 전 상태로 되돌렸습니다.\n' + err.message);
           }
           return;
         }
@@ -2555,7 +2597,7 @@
         const saving = runGoogleScriptSilent('apiSaveSystemSettings',apiType,d);
         closeModal('system');
         showToast('저장 요청을 보냈습니다');
-        try { await saving; } catch (err) { showCustomAlert('저장 실패',err.message); }
+        try { await saving; } catch (err) { if (!isConnectionLostError(err)) showCustomAlert('저장 실패',err.message); }
       };
 
       // 슬롯 일괄수정 프리셋: 기준 시각(17시) 이전/이후 시간대를 슬롯 0 / 활성화 ON으로 일괄 마감
@@ -2629,7 +2671,7 @@
         const saving = runGoogleScriptSilent('apiSaveSystemSettings','mail_template',payload);
         closeModal('mail');
         showToast('저장 요청을 보냈습니다');
-        try { await saving; } catch (err) { showCustomAlert('저장 실패',err.message); }
+        try { await saving; } catch (err) { if (!isConnectionLostError(err)) showCustomAlert('저장 실패',err.message); }
       };
 
       const insertPlaceholder = (k) => { 
@@ -2820,6 +2862,14 @@
           if (!sessionToken || !currentUser.value) return;
           appState.value = 'authorized';
           window.addEventListener('online', fetchClientIp);
+          const markPageInterrupted = () => { ++pageInterruptions; };
+          document.addEventListener('visibilitychange', () => {
+            if (document.hidden) markPageInterrupted();
+            else if (resyncPending) resyncAfterConnectionLoss();
+          });
+          window.addEventListener('pagehide', markPageInterrupted);
+          window.addEventListener('offline', markPageInterrupted);
+          window.addEventListener('online', () => { if (resyncPending) resyncAfterConnectionLoss(); });
           
           window.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
